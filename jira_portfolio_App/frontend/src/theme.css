@@ -50,12 +50,14 @@ html[data-font-size="large"] { --app-zoom: 1.2; }
 
 body { color: var(--jsw-ink); background: var(--jsw-surface); }
 aside { background: var(--jsw-blue-dark); color: white; }
+aside { height: calc(100vh / var(--app-zoom)); overflow: hidden; }
 .brand { gap: 14px; }
 .brand-logo { width: 116px; height: auto; padding: 8px; background: white; border-radius: 8px; }
 .brand > div { border-left: 1px solid rgba(255,255,255,.28); padding-left: 13px; font-size: 12px; }
 nav a { color: #c7d0ee; }
 nav a.active { background: var(--jsw-red); color: white !important; }
 nav a:hover { background: rgba(255,255,255,.09); color: white; }
+aside nav { flex: 1 1 auto; min-height: 0; margin-bottom: 14px; padding-right: 4px; overflow-y: auto; scrollbar-width: thin; scrollbar-color: rgba(255,255,255,.3) transparent; }
 .nav-group { display: grid; gap: 4px; }
 .nav-parent { display: flex; align-items: center; justify-content: space-between; width: 100%; padding: 12px; background: rgba(255,255,255,.06); color: white; border-radius: 8px; font-size: 14px; text-align: left; }
 .nav-parent:hover { background: rgba(255,255,255,.11); }
@@ -125,7 +127,7 @@ nav a:hover { background: rgba(255,255,255,.09); color: white; }
 .field-actions button { padding: 6px 9px; }
 .field-actions .remove-field { background: #fff0f0; color: var(--jsw-red); }
 .field-actions .remove-field:hover:not(:disabled) { background: #ffe0e0; }
-.security { display: grid; gap: 3px; border-color: rgba(255,255,255,.2); color: #bdc7e6; }.security strong { color: white; }.security span { margin-bottom: 8px; font-size: 10px; }.security button { width: 100%; margin-bottom: 10px; padding: 7px; background: rgba(255,255,255,.1); color: white; }.security small { font-size: 9px; }
+.security { display: grid; flex: 0 0 auto; gap: 4px; margin-top: 0; padding-top: 14px; border-color: rgba(255,255,255,.25); color: #bdc7e6; }.security strong { color: white; }.security span { margin-bottom: 7px; font-size: 10px; }.security button,.security button:hover:not(:disabled) { width: 100%; min-height: 38px; margin-bottom: 8px; padding: 8px 10px; border: 1px solid rgba(255,255,255,.38); background: white; color: var(--jsw-blue-dark); box-shadow: 0 4px 14px rgba(0,0,0,.12); }.security button:hover:not(:disabled) { background: #eef2ff; color: var(--jsw-blue); }.security small { font-size: 9px; line-height: 1.4; }
 .user-management { display: grid; grid-template-columns: minmax(380px,.8fr) minmax(520px,1.2fr); gap: 20px; align-items: start; }
 .user-editor,.user-list { overflow: hidden; border: 1px solid var(--jsw-border); border-radius: 14px; background: white; box-shadow: 0 8px 28px rgba(33,58,143,.06); }
 .user-editor form { display: grid; gap: 18px; padding: 20px; }.user-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
