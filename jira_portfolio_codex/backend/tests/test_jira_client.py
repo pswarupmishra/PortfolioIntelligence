@@ -84,3 +84,22 @@ async def test_enhanced_jql_uses_next_page_token() -> None:
     assert [item["id"] for item in issues] == ["1", "2"]
     assert bodies[1]["nextPageToken"] == "next"
     assert all(body["fieldsByKeys"] is False for body in bodies)
+
+
+@pytest.mark.asyncio
+async def test_bulk_changelog_filters_due_date_and_paginates() -> None:
+    bodies = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content)
+        bodies.append(body)
+        if "nextPageToken" not in body:
+            return httpx.Response(200, json={"issueChangeLogs": [{"issueId": "1"}], "nextPageToken": "next"})
+        return httpx.Response(200, json={"issueChangeLogs": [{"issueId": "2"}]})
+
+    async with JiraClient("https://example.atlassian.net", "a", "b", transport=httpx.MockTransport(handler)) as client:
+        logs = [item async for item in client.bulk_changelogs(["1", "2"], ["duedate"])]
+
+    assert [item["issueId"] for item in logs] == ["1", "2"]
+    assert bodies[0]["fieldIds"] == ["duedate"]
+    assert bodies[1]["nextPageToken"] == "next"

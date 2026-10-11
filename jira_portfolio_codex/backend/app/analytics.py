@@ -181,7 +181,7 @@ class AnalyticsService:
             )
             or 0
         )
-        now = datetime.now(timezone.utc)
+        now = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
         overdue = (
             self.db.scalar(
                 select(func.count(distinct(Issue.id)))
@@ -251,7 +251,19 @@ class AnalyticsService:
             )
             or 0
         )
-        now = datetime.now(timezone.utc)
+        now = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+        baseline_delayed = (
+            self.db.scalar(
+                select(func.count(distinct(Issue.id)))
+                .join(JiraStatus, JiraStatus.jira_status_id == Issue.status_jira_id, isouter=True)
+                .where(
+                    Issue.id.in_(select(leaves.c.id)),
+                    Issue.baseline_due_at < now,
+                    or_(JiraStatus.category_key.is_(None), JiraStatus.category_key != "done"),
+                )
+            )
+            or 0
+        )
         delayed = (
             self.db.scalar(
                 select(func.count(distinct(Issue.id)))
@@ -264,10 +276,42 @@ class AnalyticsService:
             )
             or 0
         )
+        on_track = (
+            self.db.scalar(
+                select(func.count(distinct(Issue.id)))
+                .join(JiraStatus, JiraStatus.jira_status_id == Issue.status_jira_id, isouter=True)
+                .where(
+                    Issue.id.in_(select(leaves.c.id)),
+                    Issue.due_at >= now,
+                    or_(JiraStatus.category_key.is_(None), JiraStatus.category_key != "done"),
+                )
+            )
+            or 0
+        )
+        no_due_date = (
+            self.db.scalar(
+                select(func.count(distinct(Issue.id)))
+                .join(JiraStatus, JiraStatus.jira_status_id == Issue.status_jira_id, isouter=True)
+                .where(
+                    Issue.id.in_(select(leaves.c.id)),
+                    Issue.due_at.is_(None),
+                    or_(JiraStatus.category_key.is_(None), JiraStatus.category_key != "done"),
+                )
+            )
+            or 0
+        )
         next_groups = 0
         if next_field_id:
             next_groups = sum(1 for group in self.group_by(next_field_id, project_ids, filters)["groups"] if group["issue_count"])
-        return {"task_count": total, "in_progress_count": in_progress, "delayed_count": delayed, "next_group_count": next_groups}
+        return {
+            "task_count": total,
+            "in_progress_count": in_progress,
+            "baseline_delayed_count": baseline_delayed,
+            "on_track_count": on_track,
+            "delayed_count": delayed,
+            "no_due_date_count": no_due_date,
+            "next_group_count": next_groups,
+        }
 
     @staticmethod
     def _metric(

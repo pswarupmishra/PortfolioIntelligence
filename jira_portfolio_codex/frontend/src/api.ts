@@ -5,7 +5,7 @@ export type Project = { jira_project_id: string; key: string; name: string; acti
 export type Field = { jira_field_id: string; name: string; schema_json: Record<string, unknown>; is_custom: boolean; searchable: boolean; selected: boolean; last_seen_at: string }
 export type Connection = { connected: boolean; base_url: string; account: { account_id?: string; display_name?: string } }
 export type SyncRun = { id: number; status: string; mode: string; projects: string[]; started_at: string; finished_at?: string; fetched_count: number; upserted_count: number; missing_count: number; anomaly_count: number; watermark_after?: string; error?: Record<string, unknown> }
-export type Issue = { jira_issue_id: string; issue_key: string; project_id: string; summary: string; parent_jira_issue_id?: string; issue_type: {id?: string; name?: string; hierarchy_level?: number}; status: {id?: string; name?: string; category_key?: string}; updated_at?: string }
+export type Issue = { jira_issue_id: string; issue_key: string; project_id: string; summary: string; parent_jira_issue_id?: string; issue_type: {id?: string; name?: string; hierarchy_level?: number}; status: {id?: string; name?: string; category_key?: string}; updated_at?: string; baseline_due_at?: string | null; due_at?: string | null }
 export type PortfolioMetric = {metric_id: string; value: number | null; numerator: number; denominator: number; unit: string; as_of?: string; warnings: string[]}
 export type PortfolioSummary = {metrics: PortfolioMetric[]; scope_count: number; null_counts: Record<string, number>; sync_version: number}
 export type TraceabilityConfig = {project_id: string; grouping_fields: string[]; updated_at: string | null; persisted: boolean}
@@ -39,6 +39,6 @@ export const api = {
   summary: (projectIds: string[]) => request<PortfolioSummary>(`/api/v1/portfolio/summary?${projectIds.map(id => `project_ids=${encodeURIComponent(id)}`).join('&')}`),
   groupBy: (fieldId: string, projectIds: string[], filters?: Record<string, unknown>) => request<{field_id: string; groups: {value: unknown; label: string; issue_count: number}[]; non_additive: boolean; warnings: string[]}>(
     '/api/v1/analytics/group-by', {method: 'POST', body: JSON.stringify({field_id: fieldId, project_ids: projectIds, filters, aggregation: 'count'})}),
-  cardGroups: (fieldId: string, nextFieldId: string | undefined, projectIds: string[], filters?: Record<string, unknown>) => request<{field_id: string; groups: {value: unknown; label: string; issue_count: number; task_count: number; in_progress_count: number; delayed_count: number; next_group_count: number}[]; non_additive: boolean; warnings: string[]}>(
+  cardGroups: (fieldId: string, nextFieldId: string | undefined, projectIds: string[], filters?: Record<string, unknown>) => request<{field_id: string; groups: {value: unknown; label: string; issue_count: number; task_count: number; in_progress_count: number; baseline_delayed_count: number; on_track_count: number; delayed_count: number; no_due_date_count: number; next_group_count: number}[]; non_additive: boolean; warnings: string[]}>(
     '/api/v1/analytics/card-groups', {method: 'POST', body: JSON.stringify({field_id: fieldId, next_field_id: nextFieldId, project_ids: projectIds, filters})}),
 }

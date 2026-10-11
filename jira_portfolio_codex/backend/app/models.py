@@ -122,12 +122,26 @@ class Issue(Base):
     created_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
     due_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    baseline_due_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
     resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     raw_fields_json: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
     last_seen_sync_id: Mapped[int | None] = mapped_column(ForeignKey("sync_runs.id"), index=True)
     is_deleted_or_inaccessible: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
     synced_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     field_values: Mapped[list["IssueFieldValue"]] = relationship(cascade="all, delete-orphan")
+
+
+class IssueDateChange(Base):
+    __tablename__ = "issue_date_changes"
+    __table_args__ = (UniqueConstraint("issue_id", "jira_field_id", "changelog_id", name="uq_issue_date_changelog"),)
+    id: Mapped[int] = mapped_column(primary_key=True)
+    issue_id: Mapped[int] = mapped_column(ForeignKey("issues.id", ondelete="CASCADE"), index=True)
+    jira_field_id: Mapped[str] = mapped_column(String(200), index=True)
+    changelog_id: Mapped[str] = mapped_column(String(100))
+    changed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    author_account_id: Mapped[str | None] = mapped_column(String(200))
+    from_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    to_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class IssueFieldValue(Base):

@@ -136,3 +136,25 @@ class JiraClient:
             next_page_token = data.get("nextPageToken")
             if data.get("isLast") is True or not next_page_token:
                 break
+
+    async def bulk_changelogs(
+        self, issue_ids_or_keys: list[str], field_ids: list[str], page_size: int = 1000
+    ) -> AsyncIterator[dict[str, Any]]:
+        """Fetch filtered changelogs in Jira's supported batches of 1,000 issues."""
+        for offset in range(0, len(issue_ids_or_keys), 1000):
+            issue_batch = issue_ids_or_keys[offset : offset + 1000]
+            next_page_token: str | None = None
+            while True:
+                body: dict[str, Any] = {
+                    "issueIdsOrKeys": issue_batch,
+                    "fieldIds": field_ids,
+                    "maxResults": page_size,
+                }
+                if next_page_token:
+                    body["nextPageToken"] = next_page_token
+                data = await self.request("POST", "/rest/api/3/changelog/bulkfetch", json=body)
+                for issue_log in data.get("issueChangeLogs", []):
+                    yield issue_log
+                next_page_token = data.get("nextPageToken")
+                if not next_page_token:
+                    break

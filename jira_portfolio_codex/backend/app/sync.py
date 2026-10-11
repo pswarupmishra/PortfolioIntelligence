@@ -9,6 +9,7 @@ from .jira import JiraClient
 from .models import (
     HierarchyAnomaly,
     Issue,
+    IssueDateChange,
     IssueFieldValue,
     IssueRelationship,
     JiraProject,
@@ -76,6 +77,7 @@ class SyncService:
                 fetched = [issue async for issue in self.jira.search_issues(jql, ["*all"])]
                 now = datetime.now(timezone.utc)
                 seen = self._upsert_issues(fetched, run.id, now)
+                await self._sync_due_date_history(list(seen))
                 if mode == "full":
                     run.missing_count = self._reconcile(run.projects_json, seen)
                 self._resolve_relationships(run.id)
@@ -102,6 +104,54 @@ class SyncService:
                     failed.error_json = {"type": type(exc).__name__, "message": str(exc)}
                     self.db.commit()
                 raise
+
+    async def _sync_due_date_history(self, jira_issue_ids: list[str]) -> None:
+        if not jira_issue_ids:
+            return
+        histories_by_issue: dict[str, list[dict[str, Any]]] = {}
+        async for issue_log in self.jira.bulk_changelogs(jira_issue_ids, ["duedate"]):
+            issue_id = str(issue_log.get("issueId", ""))
+            if issue_id:
+                histories_by_issue.setdefault(issue_id, []).extend(issue_log.get("changeHistories") or [])
+
+        for jira_issue_id in jira_issue_ids:
+            issue = self.db.scalar(select(Issue).where(Issue.jira_issue_id == jira_issue_id))
+            if issue is None:
+                continue
+            histories = sorted(histories_by_issue.get(jira_issue_id, []), key=lambda row: row.get("created") or "")
+            baseline: datetime | None = None
+            for history in histories:
+                changed_at = parse_datetime(history.get("created"))
+                if changed_at is None:
+                    continue
+                for index, item in enumerate(history.get("items") or []):
+                    if item.get("fieldId") != "duedate" and item.get("field") != "Due date":
+                        continue
+                    from_at = parse_datetime(item.get("fromString"))
+                    to_at = parse_datetime(item.get("toString"))
+                    baseline = baseline or from_at or to_at
+                    changelog_id = str(history.get("id") or f"{changed_at.isoformat()}:{index}")
+                    existing = self.db.scalar(
+                        select(IssueDateChange).where(
+                            IssueDateChange.issue_id == issue.id,
+                            IssueDateChange.jira_field_id == "duedate",
+                            IssueDateChange.changelog_id == changelog_id,
+                        )
+                    )
+                    if existing is None:
+                        self.db.add(
+                            IssueDateChange(
+                                issue_id=issue.id,
+                                jira_field_id="duedate",
+                                changelog_id=changelog_id,
+                                changed_at=changed_at,
+                                author_account_id=(history.get("author") or {}).get("accountId"),
+                                from_at=from_at,
+                                to_at=to_at,
+                            )
+                        )
+            if issue.baseline_due_at is None:
+                issue.baseline_due_at = baseline or issue.due_at
 
     def _projects(self, project_ids: list[str] | None) -> list[JiraProject]:
         query = select(JiraProject).where(JiraProject.active.is_(True))

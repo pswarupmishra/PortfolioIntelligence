@@ -68,6 +68,21 @@ function CardViewPage({projects, fields, configured}: {projects: Project[]; fiel
   return <><PageHeader eyebrow="TRACEABILITY CARDS" title="Card view" subtitle={project ? `${project.key} · ${groupingFields.length} grouping levels` : 'Select a project'} configured={configured}/><section className="project-picker"><label>Project <select aria-label="Card view project" value={projectId} onChange={event => setProjectId(event.target.value)}><option value="" disabled>Select a project</option>{projects.map(item => <option key={item.jira_project_id} value={item.jira_project_id}>{item.key} · {item.name}</option>)}</select></label><span>{config.data?.persisted ? 'Saved traceability configuration' : 'Using default grouping'}</span></section>{projectId && !config.isLoading ? <section className="card-browser" key={`${projectId}-${groupingFields.join('|')}`}><div className="cardhead"><div><span className="step">NESTED CARD PATH</span><h2>{groupingFields.map(field => groupingChoices(fields).find(choice => choice.id === field)?.name ?? field).join(' → ')}</h2></div><span>Select a card to open the next level</span></div><CardGroupingBranch projectId={projectId} fields={groupingFields} choices={groupingChoices(fields)} level={0} filters={[]}/></section> : <State text="Loading card configuration…"/>}</>
 }
 
+type CardMetricsData = {task_count: number; in_progress_count: number; baseline_delayed_count: number; on_track_count: number; delayed_count: number; no_due_date_count: number; next_group_count: number}
+
+function CardMetrics({group, showNext}: {group: CardMetricsData; showNext: boolean}) {
+  const rows = [
+    {icon: '▦', label: 'Tasks', value: group.task_count, tone: 'tasks', hint: 'Bottom-level work items'},
+    {icon: '◔', label: 'In progress', value: group.in_progress_count, tone: 'progress', hint: 'Tasks in Jira status category In Progress'},
+    {icon: '◆', label: 'Baseline delayed', value: group.baseline_delayed_count, tone: 'baseline', hint: 'Open tasks past their first Jira due date'},
+    {icon: '✓', label: 'Revised on track', value: group.on_track_count, tone: 'track', hint: 'Open tasks whose current Jira due date has not passed'},
+    {icon: '!', label: 'Revised delayed', value: group.delayed_count, tone: 'delay', hint: 'Open tasks past their current Jira due date'},
+    {icon: '∅', label: 'No due date', value: group.no_due_date_count, tone: 'missing', hint: 'Open tasks without a Jira due date'},
+    ...(showNext ? [{icon: '⇲', label: 'Next-level groups', value: group.next_group_count, tone: 'groups', hint: 'Distinct groups at the next configured level'}] : []),
+  ]
+  return <table className="card-metrics" aria-label="Card metrics"><tbody>{rows.map(row => <tr className={`metric-${row.tone}`} title={row.hint} key={row.label}><td><span className="metric-icon" aria-hidden="true">{row.icon}</span>{row.label}</td><td>{row.value}</td></tr>)}</tbody></table>
+}
+
 function CardGroupingBranch({projectId, fields, choices, level, filters}: {projectId: string; fields: string[]; choices: {id: string; name: string}[]; level: number; filters: Record<string, unknown>[]}) {
   const [selected, setSelected] = useState<Group | null>(null)
   const field = fields[level]
@@ -77,16 +92,35 @@ function CardGroupingBranch({projectId, fields, choices, level, filters}: {proje
   const fieldName = choices.find(choice => choice.id === field)?.name ?? field
   if (groups.isLoading) return <State text={`Loading ${fieldName} cards…`}/>
   if (groups.error) return <State text={groups.error.message}/>
-  return <div className="card-level"><div className="card-level-title"><span>Level {level + 1}</span><strong>{fieldName}</strong></div><div className="trace-card-grid">{groups.data?.groups.map(group => { const open = selected?.value === group.value; const nextFilters = [...filters, groupFilter(field, group)]; return <article className={`trace-card ${open ? 'open' : ''}`} key={`${field}-${String(group.value)}`}><button className="trace-card-button" onClick={() => setSelected(open ? null : group)} aria-expanded={open}><span>{group.label}</span><strong>{group.issue_count}</strong><div className="card-summary"><span><b>{group.task_count}</b> tasks</span><span><b>{group.in_progress_count}</b> in progress</span><span className={group.delayed_count ? 'delayed' : ''}><b>{group.delayed_count}</b> delayed</span>{nextField && <span><b>{group.next_group_count}</b> next-level groups</span>}</div><small>{level === fields.length - 1 ? 'View work items' : `Open level ${level + 2}`}</small></button>{open && <div className="trace-card-children">{level === fields.length - 1 ? <CardResults projectId={projectId} filter={combineFilters(nextFilters)!} direct={fields.includes('issue_type_id')} groupLabel={group.label}/> : <CardGroupingBranch projectId={projectId} fields={fields} choices={choices} level={level + 1} filters={nextFilters}/>}</div>}</article>})}</div>{groups.data?.non_additive && <p className="group-warning">Multi-value groups can overlap.</p>}</div>
+  return <div className="card-level"><div className="card-level-title"><span>Level {level + 1}</span><strong>{fieldName}</strong></div><div className="trace-card-grid">{groups.data?.groups.map(group => { const open = selected?.value === group.value; const muted = selected !== null && !open; const empty = group.task_count === 0; const nextFilters = [...filters, groupFilter(field, group)]; return <article className={`trace-card ${open ? 'open' : ''} ${muted ? 'muted' : ''} ${empty ? 'empty-card' : ''}`} key={`${field}-${String(group.value)}`}><button className="trace-card-button" onClick={() => setSelected(open ? null : group)} aria-expanded={open}><span>{group.label}</span><strong>{group.issue_count}</strong><CardMetrics group={group} showNext={Boolean(nextField)}/><small>{level === fields.length - 1 ? 'View work items' : `Open level ${level + 2}`}</small></button>{open && <div className="trace-card-children">{level === fields.length - 1 ? <CardResults projectId={projectId} filter={combineFilters(nextFilters)!} direct={fields.includes('issue_type_id')} groupLabel={group.label}/> : <CardGroupingBranch projectId={projectId} fields={fields} choices={choices} level={level + 1} filters={nextFilters}/>}</div>}</article>})}</div>{groups.data?.non_additive && <p className="group-warning">Multi-value groups can overlap.</p>}</div>
 }
 
 function CardResults({projectId, filter, direct, groupLabel}: {projectId: string; filter: Record<string, unknown>; direct: boolean; groupLabel: string}) {
+  type SortField = 'key' | 'summary' | 'type' | 'baseline' | 'revised' | 'status'
+  const [sortField, setSortField] = useState<SortField>('key')
+  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc')
   const epics = useQuery({queryKey: ['card-result-epics', projectId, filter], queryFn: () => api.epicsByFilter([projectId], filter), enabled: !direct})
   const issues = useQuery({queryKey: ['card-result-issues', projectId, filter], queryFn: () => api.issuesByFilter([projectId], filter), enabled: direct})
   const result = direct ? issues : epics
+  const changeSort = (field: SortField) => { if (sortField === field) setSortDirection(value => value === 'asc' ? 'desc' : 'asc'); else { setSortField(field); setSortDirection('asc') } }
+  const valueFor = (issue: Issue) => ({key: issue.issue_key, summary: issue.summary, type: issue.issue_type.name ?? '', baseline: issue.baseline_due_at ?? '', revised: issue.due_at ?? '', status: issue.status.name ?? ''})[sortField]
+  const sortedItems = [...(result.data?.items ?? [])].sort((left, right) => valueFor(left).localeCompare(valueFor(right), undefined, {numeric: true}) * (sortDirection === 'asc' ? 1 : -1))
   if (result.isLoading) return <State text="Loading work items…"/>
   if (result.error) return <State text={result.error.message}/>
-  return <div className="card-result-grid"><div className="result-head"><strong>{groupLabel}</strong><span>{result.data?.total_count ?? 0} results</span></div>{result.data?.items.length ? <div className="issue-list">{result.data.items.map(issue => <div className="issue-row" key={issue.jira_issue_id}><b>{issue.issue_key}</b><span>{issue.summary}</span><small>{issue.issue_type.name ?? 'Unknown type'} · {issue.status.name ?? 'Unknown status'}</small></div>)}</div> : <State text="No matching work items."/>}</div>
+  const sortButton = (field: SortField, label: string) => <button className={sortField === field ? 'sorted' : ''} onClick={() => changeSort(field)}>{label}<span aria-hidden="true">{sortField === field ? sortDirection === 'asc' ? '▲' : '▼' : '↕'}</span></button>
+  return <div className="card-result-grid"><div className="result-head"><strong>{groupLabel}</strong><span>{result.data?.total_count ?? 0} results</span></div>{sortedItems.length ? <div className="issue-list"><div className="issue-grid-head">{sortButton('key', 'Key')}{sortButton('summary', 'Summary')}{sortButton('type', 'Issue type')}{sortButton('baseline', 'Baseline due')}{sortButton('revised', 'Revised due')}{sortButton('status', 'Status')}</div>{sortedItems.map(issue => <div className="issue-row card-issue-row" key={issue.jira_issue_id}><b>{issue.issue_key}</b><span>{issue.summary}</span><small>{issue.issue_type.name ?? 'Unknown type'}</small><DueDate value={issue.baseline_due_at}/><DueDate value={issue.due_at} revised/><StatusBadge name={issue.status.name} category={issue.status.category_key}/></div>)}</div> : <State text="No matching work items."/>}</div>
+}
+
+function DueDate({value, revised = false}: {value?: string | null; revised?: boolean}) {
+  if (!value) return <span className="due-date missing"><i aria-hidden="true">—</i>Not set</span>
+  const display = new Intl.DateTimeFormat(undefined, {day: '2-digit', month: 'short', year: 'numeric', timeZone: 'UTC'}).format(new Date(value))
+  return <span className={`due-date ${revised ? 'revised' : 'baseline'}`}><i aria-hidden="true">{revised ? '↻' : '◆'}</i>{display}</span>
+}
+
+function StatusBadge({name, category}: {name?: string; category?: string}) {
+  const tone = category === 'done' ? 'done' : category === 'indeterminate' ? 'progress' : 'todo'
+  const icon = tone === 'done' ? '✓' : tone === 'progress' ? '◔' : '○'
+  return <span className={`status-badge status-${tone}`}><i aria-hidden="true">{icon}</i>{name ?? 'Unknown status'}</span>
 }
 
 function HierarchyPage({projects, fields, configured}: {projects: Project[]; fields: Field[]; configured?: boolean}) {

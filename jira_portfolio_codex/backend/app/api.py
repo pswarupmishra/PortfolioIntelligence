@@ -306,6 +306,7 @@ def issue_dict(issue: Issue, db: Session, include_fields: bool = False) -> dict[
         },
         "parent_jira_issue_id": issue.parent_jira_issue_id,
         "updated_at": issue.updated_at,
+        "baseline_due_at": issue.baseline_due_at,
         "due_at": issue.due_at,
         "is_deleted_or_inaccessible": issue.is_deleted_or_inaccessible,
     }

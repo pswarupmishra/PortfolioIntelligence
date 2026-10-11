@@ -18,6 +18,7 @@ Phase 0 through Phase 3 provide a runnable React/FastAPI application for securel
 - Validated metadata-driven filter AST with `and/or/not` plus `eq`, `ne`, `in`, `not_in`, `is_null`, `contains`, `gte`, `lte`, and `between` where field types support them.
 - Distinct-issue group-by for core and custom fields, explicit non-additive warnings for multiselect fields, and numeric `sum/avg/min/max` with excluded-null counts.
 - Portfolio KPIs for total work, leaf completion, overdue, and unassigned items with visible numerators, denominators, null counts, warnings, freshness, and sync version.
+- Due-date changelog synchronization for Jira's standard `duedate` field, preserving the first assigned date as an immutable baseline. Card summaries distinguish baseline delayed, revised on-track, and revised delayed open leaf tasks.
 - Persisted metric definitions and dashboard configurations with field/filter validation and CRUD APIs.
 - Mocked tests for paging, 401/403, 429 retry/exhaustion, metadata persistence, renamed custom fields, and basic API authorization/health.
 
@@ -30,6 +31,7 @@ Historical trend snapshots and Phase 4's full interactive dashboard builder are 
 - A Jira Cloud service account with the minimum required read permissions
 
 The backend uses these read-only Jira endpoints: `/rest/api/3/myself`, `/project/search`, `/field`, `/issuetype`, `/status`, and custom-field context/option endpoints. Jira may require administrative permission for some field metadata; the UI/API surfaces that limitation.
+Issue synchronization also uses `POST /rest/api/3/changelog/bulkfetch`, filtered to the standard `duedate` field, to derive baseline-versus-revised schedule metrics.
 
 ## Local setup
 

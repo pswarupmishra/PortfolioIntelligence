@@ -8,7 +8,15 @@ from app.models import HierarchyAnomaly, Issue, IssueFieldValue, IssueRelationsh
 from app.sync import SyncService
 
 
-def issue(issue_id: str, key: str, parent: str | None = None, *, updated: str = "2026-10-10T10:00:00Z", custom: object = None) -> dict:
+def issue(
+    issue_id: str,
+    key: str,
+    parent: str | None = None,
+    *,
+    updated: str = "2026-10-10T10:00:00Z",
+    custom: object = None,
+    due_date: str | None = None,
+) -> dict:
     fields = {
         "project": {"id": "10732"},
         "summary": key,
@@ -17,6 +25,7 @@ def issue(issue_id: str, key: str, parent: str | None = None, *, updated: str = 
         "updated": updated,
         "created": "2026-01-01T00:00:00Z",
         "customfield_dynamic": custom,
+        "duedate": due_date,
     }
     if parent:
         fields["parent"] = {"id": parent}
@@ -24,8 +33,9 @@ def issue(issue_id: str, key: str, parent: str | None = None, *, updated: str = 
 
 
 class StubJira:
-    def __init__(self, pages: list[list[dict]]) -> None:
+    def __init__(self, pages: list[list[dict]], changelogs: list[dict] | None = None) -> None:
         self.pages = pages
+        self.changelogs = changelogs or []
         self.jqls: list[str] = []
 
     async def search_issues(self, jql: str, fields: list[str], page_size: int = 100) -> AsyncIterator[dict]:
@@ -34,6 +44,11 @@ class StubJira:
         for page in self.pages:
             for value in page:
                 yield value
+
+    async def bulk_changelogs(self, issue_ids_or_keys: list[str], field_ids: list[str]) -> AsyncIterator[dict]:
+        assert field_ids == ["duedate"]
+        for value in self.changelogs:
+            yield value
 
 
 def session() -> Session:
@@ -90,3 +105,36 @@ async def test_missing_parents_and_cycles_are_flagged() -> None:
     anomalies = list(db.scalars(select(HierarchyAnomaly).where(HierarchyAnomaly.sync_run_id == run.id)))
     assert {item.anomaly_type for item in anomalies} == {"cycle", "missing_parent"}
     assert run.anomaly_count == 3
+
+
+async def test_due_date_changelog_preserves_first_assigned_baseline() -> None:
+    db = session()
+    jira = StubJira(
+        [[issue("1", "SDHI-1", due_date="2026-12-15")]],
+        [
+            {
+                "issueId": "1",
+                "changeHistories": [
+                    {
+                        "id": "101",
+                        "created": "2026-01-02T10:00:00Z",
+                        "author": {"accountId": "pmo-user"},
+                        "items": [{"fieldId": "duedate", "field": "Due date", "fromString": None, "toString": "2026-10-01"}],
+                    },
+                    {
+                        "id": "102",
+                        "created": "2026-09-30T10:00:00Z",
+                        "author": {"accountId": "pmo-user"},
+                        "items": [
+                            {"fieldId": "duedate", "field": "Due date", "fromString": "2026-10-01", "toString": "2026-12-15"}
+                        ],
+                    },
+                ],
+            }
+        ],
+    )
+    await SyncService(db, jira).run("full", ["10732"])  # type: ignore[arg-type]
+    saved = db.scalar(select(Issue).where(Issue.jira_issue_id == "1"))
+    assert saved is not None
+    assert saved.baseline_due_at.isoformat().startswith("2026-10-01")  # type: ignore[union-attr]
+    assert saved.due_at.isoformat().startswith("2026-12-15")  # type: ignore[union-attr]

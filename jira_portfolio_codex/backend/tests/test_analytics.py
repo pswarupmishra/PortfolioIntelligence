@@ -55,6 +55,7 @@ def analytics_db() -> Session:
             status_jira_id="progress",
             assignee_account_id="user",
             due_at=datetime(2026, 10, 1, tzinfo=timezone.utc),
+            baseline_due_at=datetime(2026, 9, 1, tzinfo=timezone.utc),
             synced_at=now,
         ),
     ]
@@ -142,7 +143,10 @@ def test_card_summary_counts_leaf_tasks_in_progress_and_delayed() -> None:
     )
     assert result["task_count"] == 2
     assert result["in_progress_count"] == 1
+    assert result["baseline_delayed_count"] == 1
+    assert result["on_track_count"] == 0
     assert result["delayed_count"] == 1
+    assert result["no_due_date_count"] == 0
     assert result["next_group_count"] == 3
 
 
