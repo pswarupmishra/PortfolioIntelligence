@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 from .analytics import AnalyticsService, FilterValidationError
 from .auth import ALL_SCREENS, authenticate_token, ensure_default_admin, hash_password, issue_session, public_user, verify_password
 from .config import Settings, get_settings
-from .db import get_db
+from .db import Base, get_db
 from .jira import JiraClient
 from .metadata import MetadataService
 from .models import (
@@ -345,6 +345,45 @@ def list_project_plans(db: Db) -> dict[str, Any]:
         for item in db.scalars(select(ProjectPlan).where(ProjectPlan.project_jira_id.in_([project.jira_project_id for project in active_projects])))
     } if active_projects else {}
     return {"items": [project_plan_payload(project, plans.get(project.jira_project_id), db) for project in active_projects]}
+
+
+@router.get("/documentation/data-model", dependencies=[Depends(current_user)])
+def live_data_model(db: Db) -> dict[str, Any]:
+    """Describe the running SQLAlchemy model and current SQLite row counts."""
+    tables = sorted(Base.metadata.tables.values(), key=lambda item: item.name)
+    nodes = []
+    links = []
+    for table in tables:
+        nodes.append(
+            {
+                "id": table.name,
+                "row_count": db.scalar(select(func.count()).select_from(table)) or 0,
+                "columns": [
+                    {
+                        "name": column.name,
+                        "type": str(column.type),
+                        "primary_key": column.primary_key,
+                        "nullable": column.nullable,
+                    }
+                    for column in table.columns
+                ],
+            }
+        )
+        for foreign_key in table.foreign_keys:
+            links.append(
+                {
+                    "source": table.name,
+                    "target": foreign_key.column.table.name,
+                    "source_column": foreign_key.parent.name,
+                    "target_column": foreign_key.column.name,
+                }
+            )
+    return {
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "database": "SQLite",
+        "nodes": nodes,
+        "links": links,
+    }
 
 
 @router.put("/admin/project-plans/{jira_project_id}", dependencies=[Depends(require_admin)])

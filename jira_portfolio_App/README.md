@@ -27,6 +27,7 @@ Phase 0 through Phase 3 provide a runnable React/FastAPI application for securel
 - Clickable Overview project snapshots that open WBS with the selected Jira project.
 - Administrator-managed Project Plan dates stored in SQLite, with an immutable Baseline 1 end date and automatically numbered revised end-date history. Overview project cards show the start, original baseline, and latest baseline.
 - Live Portfolio Metrics panels for every active project, using Jira's standard JQL count API rather than synchronized SQLite issue calculations. Panels cover 18 delivery-status, schedule-health, ownership, and recent-activity counts.
+- Live physics-based Data Model documentation generated from the running SQLAlchemy metadata, including current table row counts, columns, primary keys, nullability and foreign-key flows.
 - Mocked tests for paging, 401/403, 429 retry/exhaustion, metadata persistence, renamed custom fields, and basic API authorization/health.
 
 Historical trend snapshots and Phase 4's full interactive dashboard builder are intentionally not included yet.
@@ -91,6 +92,7 @@ Run only the backend tests with `cd backend && pytest`. Tests use mocked Jira re
 - `GET /api/v1/jira/projects`
 - `GET /api/v1/jira/portfolio-metrics` for live standard Jira metrics across active projects
 - `GET /api/v1/project-plans` and `PUT /api/v1/admin/project-plans/{project_id}` for local project baseline governance
+- `GET /api/v1/documentation/data-model` for the live schema and relationship graph
 - `GET /api/v1/metadata/fields?project_id=&issue_type_id=&search=`
 - `GET /api/v1/metadata/fields/{field_id}/options`
 - `GET /api/v1/metadata/issue-types`
