@@ -194,6 +194,14 @@ class DashboardConfig(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
 
 
+class TraceabilityConfig(Base):
+    __tablename__ = "traceability_configs"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    project_jira_id: Mapped[str] = mapped_column(ForeignKey("jira_projects.jira_project_id", ondelete="CASCADE"), unique=True, index=True)
+    grouping_fields_json: Mapped[list[str]] = mapped_column(JSON, default=list)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+
 Index("ix_field_context_scope", JiraFieldContext.jira_field_id, JiraFieldContext.context_id)
 Index("ix_issues_project_parent", Issue.project_jira_id, Issue.parent_jira_issue_id)
 Index("ix_field_value_string", IssueFieldValue.jira_field_id, IssueFieldValue.string_value)

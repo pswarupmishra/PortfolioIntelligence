@@ -25,8 +25,10 @@ from .models import (
     MetadataRefresh,
     MetricDefinition,
     SyncRun,
+    TraceabilityConfig,
 )
 from .schemas import (
+    CardSummaryRequest,
     DashboardConfigIn,
     FieldOut,
     GroupByRequest,
@@ -37,6 +39,7 @@ from .schemas import (
     SelectionUpdate,
     StatusOut,
     SyncRequest,
+    TraceabilityConfigIn,
 )
 from .sync import SyncBusyError, SyncService, sync_version
 
@@ -113,6 +116,43 @@ def select_project(jira_project_id: str, update: SelectionUpdate, db: Db) -> Pro
     row.active = update.selected
     db.commit()
     return ProjectOut.model_validate(row)
+
+
+def traceability_config_dict(row: TraceabilityConfig | None, project_id: str) -> dict[str, Any]:
+    return {
+        "project_id": project_id,
+        "grouping_fields": row.grouping_fields_json if row else ["labels", "status_id", "issue_type_id"],
+        "updated_at": row.updated_at if row else None,
+        "persisted": row is not None,
+    }
+
+
+@router.get("/traceability-config/{project_id}")
+def get_traceability_config(project_id: str, db: Db) -> dict[str, Any]:
+    if db.scalar(select(JiraProject).where(JiraProject.jira_project_id == project_id)) is None:
+        raise HTTPException(404, "Project not found")
+    row = db.scalar(select(TraceabilityConfig).where(TraceabilityConfig.project_jira_id == project_id))
+    return traceability_config_dict(row, project_id)
+
+
+@router.put("/admin/traceability-config/{project_id}", dependencies=[Depends(require_admin)])
+def save_traceability_config(project_id: str, update: TraceabilityConfigIn, db: Db) -> dict[str, Any]:
+    if db.scalar(select(JiraProject).where(JiraProject.jira_project_id == project_id)) is None:
+        raise HTTPException(404, "Project not found")
+    core_fields = {"status_id", "issue_type_id", "assignee"}
+    discovered = set(db.scalars(select(JiraField.jira_field_id)))
+    unknown = [field_id for field_id in update.grouping_fields if field_id not in core_fields | discovered]
+    if unknown:
+        raise HTTPException(422, f"Unknown grouping fields: {', '.join(unknown)}")
+    row = db.scalar(select(TraceabilityConfig).where(TraceabilityConfig.project_jira_id == project_id))
+    if row is None:
+        row = TraceabilityConfig(project_jira_id=project_id, grouping_fields_json=update.grouping_fields)
+        db.add(row)
+    else:
+        row.grouping_fields_json = update.grouping_fields
+    db.commit()
+    db.refresh(row)
+    return traceability_config_dict(row, project_id)
 
 
 @router.get("/metadata/fields", response_model=ListEnvelope[FieldOut])
@@ -380,6 +420,53 @@ def hierarchy_anomalies(db: Db) -> dict[str, Any]:
     }
 
 
+@router.get("/hierarchy/epics")
+def hierarchy_epics(
+    db: Db,
+    project_ids: Annotated[list[str] | None, Query()] = None,
+    filters: str | None = None,
+    cursor: int = Query(0, ge=0),
+    limit: int = Query(50, ge=1, le=200),
+) -> dict[str, Any]:
+    """Return epic ancestors for work items matching a metadata-driven filter."""
+    matching_query = select(Issue).where(Issue.is_deleted_or_inaccessible.is_(False))
+    scoped_query = select(Issue).where(Issue.is_deleted_or_inaccessible.is_(False))
+    if project_ids:
+        matching_query = matching_query.where(Issue.project_jira_id.in_(project_ids))
+        scoped_query = scoped_query.where(Issue.project_jira_id.in_(project_ids))
+    try:
+        filter_ast = parsed_filters(filters)
+        if filter_ast:
+            matching_query = matching_query.where(AnalyticsService(db).compile_filter(filter_ast))
+    except FilterValidationError as exc:
+        raise HTTPException(422, str(exc)) from exc
+
+    matching = list(db.scalars(matching_query))
+    scoped = list(db.scalars(scoped_query))
+    by_jira_id = {issue.jira_issue_id: issue for issue in scoped}
+    hierarchy_levels = {issue_type.jira_type_id: issue_type.hierarchy_level for issue_type in db.scalars(select(JiraIssueType))}
+    epic_ids: set[int] = set()
+    for match in matching:
+        current: Issue | None = match
+        visited: set[str] = set()
+        while current and current.jira_issue_id not in visited:
+            visited.add(current.jira_issue_id)
+            if hierarchy_levels.get(current.issue_type_jira_id or "") == 1:
+                epic_ids.add(current.id)
+                break
+            current = by_jira_id.get(current.parent_jira_issue_id or "")
+
+    epics = sorted((issue for issue in scoped if issue.id in epic_ids), key=lambda issue: issue.issue_key)
+    page = epics[cursor : cursor + limit]
+    return {
+        "items": [issue_dict(issue, db) for issue in page],
+        "next_cursor": str(cursor + limit) if cursor + limit < len(epics) else None,
+        "total_count": len(epics),
+        "matching_work_item_count": len(matching),
+        "sync_version": sync_version(db),
+    }
+
+
 def parsed_filters(value: str | None) -> dict[str, Any] | None:
     if not value:
         return None
@@ -418,6 +505,24 @@ def analytics_group_by(request: GroupByRequest, db: Db) -> dict[str, Any]:
         if request.aggregation != "count":
             return AnalyticsService(db).numeric_aggregate(request.field_id, request.aggregation, request.project_ids, request.filters)
         return AnalyticsService(db).group_by(request.field_id, request.project_ids, request.filters)
+    except FilterValidationError as exc:
+        raise HTTPException(422, str(exc)) from exc
+
+
+@router.post("/analytics/card-groups")
+def analytics_card_groups(request: CardSummaryRequest, db: Db) -> dict[str, Any]:
+    try:
+        service = AnalyticsService(db)
+        grouped = service.group_by(request.field_id, request.project_ids, request.filters)
+        for group in grouped["groups"]:
+            leaf_filter = {
+                "field_id": request.field_id,
+                "operator": "is_null" if group["value"] is None else "eq",
+                "value": True if group["value"] is None else group["value"],
+            }
+            scoped_filter = {"and": [request.filters, leaf_filter]} if request.filters else leaf_filter
+            group.update(service.card_summary(request.project_ids, scoped_filter, request.next_field_id))
+        return grouped
     except FilterValidationError as exc:
         raise HTTPException(422, str(exc)) from exc
 

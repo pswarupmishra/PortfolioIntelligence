@@ -4,7 +4,7 @@ from typing import Any
 from sqlalchemy import String, and_, cast, distinct, exists, func, not_, or_, select
 from sqlalchemy.orm import Session, aliased
 
-from .models import Issue, IssueFieldValue, JiraField, JiraStatus
+from .models import Issue, IssueFieldValue, JiraField, JiraIssueType, JiraStatus
 from .sync import parse_datetime, sync_version
 
 CORE_FIELDS: dict[str, Any] = {
@@ -226,6 +226,49 @@ class AnalyticsService:
             "sync_version": sync_version(self.db),
         }
 
+    def card_summary(self, project_ids: list[str] | None, filters: dict[str, Any], next_field_id: str | None = None) -> dict[str, int]:
+        scope_ids = self.base_query(project_ids, filters).subquery()
+        children = aliased(Issue)
+        leaves = (
+            select(Issue.id)
+            .where(
+                Issue.id.in_(select(scope_ids.c.id)),
+                ~exists(
+                    select(1).where(
+                        children.parent_jira_issue_id == Issue.jira_issue_id,
+                        children.is_deleted_or_inaccessible.is_(False),
+                    )
+                ),
+            )
+            .subquery()
+        )
+        total = self.db.scalar(select(func.count()).select_from(leaves)) or 0
+        in_progress = (
+            self.db.scalar(
+                select(func.count(distinct(Issue.id)))
+                .join(JiraStatus, JiraStatus.jira_status_id == Issue.status_jira_id)
+                .where(Issue.id.in_(select(leaves.c.id)), JiraStatus.category_key == "indeterminate")
+            )
+            or 0
+        )
+        now = datetime.now(timezone.utc)
+        delayed = (
+            self.db.scalar(
+                select(func.count(distinct(Issue.id)))
+                .join(JiraStatus, JiraStatus.jira_status_id == Issue.status_jira_id, isouter=True)
+                .where(
+                    Issue.id.in_(select(leaves.c.id)),
+                    Issue.due_at < now,
+                    or_(JiraStatus.category_key.is_(None), JiraStatus.category_key != "done"),
+                )
+            )
+            or 0
+        )
+        next_groups = 0
+        if next_field_id:
+            next_groups = sum(1 for group in self.group_by(next_field_id, project_ids, filters)["groups"] if group["issue_count"])
+        return {"task_count": total, "in_progress_count": in_progress, "delayed_count": delayed, "next_group_count": next_groups}
+
     @staticmethod
     def _metric(
         metric_id: str, value: Any, numerator: int, denominator: int, unit: str, as_of: datetime | None, warnings: list[str] | None = None
@@ -334,6 +377,8 @@ class AnalyticsService:
         labels: dict[Any, str] = {}
         if field_id == "status_id":
             labels = {row.jira_status_id: row.name for row in self.db.scalars(select(JiraStatus))}
+        elif field_id == "issue_type_id":
+            labels = {row.jira_type_id: row.name for row in self.db.scalars(select(JiraIssueType))}
         groups = []
         for row in rows:
             if len(row) == 3:

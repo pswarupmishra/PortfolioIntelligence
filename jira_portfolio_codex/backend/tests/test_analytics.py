@@ -5,8 +5,9 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
 from app.analytics import AnalyticsService, FilterValidationError
+from app.api import hierarchy_epics
 from app.db import Base
-from app.models import Issue, IssueFieldValue, JiraField, JiraStatus
+from app.models import Issue, IssueFieldValue, JiraField, JiraIssueType, JiraStatus
 
 
 def analytics_db() -> Session:
@@ -17,6 +18,7 @@ def analytics_db() -> Session:
         [
             JiraStatus(jira_status_id="done", name="Done", category_key="done"),
             JiraStatus(jira_status_id="open", name="Open", category_key="new"),
+            JiraStatus(jira_status_id="progress", name="In Progress", category_key="indeterminate"),
             JiraField(jira_field_id="tags", name="Tags", schema_json={"type": "array", "items": "option"}, is_custom=True),
             JiraField(jira_field_id="score", name="Score", schema_json={"type": "number"}, is_custom=True),
             JiraField(jira_field_id="target", name="Target", schema_json={"type": "date"}, is_custom=True),
@@ -31,7 +33,7 @@ def analytics_db() -> Session:
             project_jira_id="10732",
             summary="Parent",
             status_jira_id="open",
-            due_at=datetime(2026, 10, 1, tzinfo=timezone.utc),
+            due_at=datetime(2026, 10, 3, tzinfo=timezone.utc),
             synced_at=now,
         ),
         Issue(
@@ -50,8 +52,9 @@ def analytics_db() -> Session:
             issue_key="A-3",
             project_jira_id="10732",
             summary="Open leaf",
-            status_jira_id="open",
+            status_jira_id="progress",
             assignee_account_id="user",
+            due_at=datetime(2026, 10, 1, tzinfo=timezone.utc),
             synced_at=now,
         ),
     ]
@@ -130,7 +133,17 @@ def test_summary_documents_leaf_denominator_and_null_due_dates() -> None:
     assert metrics["total_work_items"]["value"] == 3
     assert metrics["leaf_completion"]["numerator"] == 1
     assert metrics["leaf_completion"]["denominator"] == 2
-    assert result["null_counts"]["due_at"] == 2
+    assert result["null_counts"]["due_at"] == 1
+
+
+def test_card_summary_counts_leaf_tasks_in_progress_and_delayed() -> None:
+    result = AnalyticsService(analytics_db()).card_summary(
+        ["10732"], {"field_id": "issue_key", "operator": "contains", "value": "A-"}, "status_id"
+    )
+    assert result["task_count"] == 2
+    assert result["in_progress_count"] == 1
+    assert result["delayed_count"] == 1
+    assert result["next_group_count"] == 3
 
 
 def test_unknown_fields_and_unsafe_shapes_are_rejected() -> None:
@@ -139,3 +152,39 @@ def test_unknown_fields_and_unsafe_shapes_are_rejected() -> None:
         service.compile_filter({"field_id": "customfield_missing", "operator": "eq", "value": "x"})
     with pytest.raises(FilterValidationError):
         service.compile_filter({"and": [], "sql": "1=1"})
+
+
+def test_grouped_hierarchy_resolves_matching_descendants_to_epics() -> None:
+    db = analytics_db()
+    db.add_all(
+        [
+            JiraIssueType(jira_type_id="epic", name="Epic", hierarchy_level=1),
+            JiraIssueType(jira_type_id="story", name="Story", hierarchy_level=0),
+        ]
+    )
+    db.get(Issue, 1).issue_type_jira_id = "epic"  # type: ignore[union-attr]
+    db.get(Issue, 2).issue_type_jira_id = "story"  # type: ignore[union-attr]
+    db.add(
+        IssueFieldValue(
+            issue_id=2,
+            jira_field_id="tags",
+            element_index=2,
+            value_type="object",
+            option_id="descendant-only",
+            string_value="Descendant only",
+            raw_value_json={"id": "descendant-only"},
+        )
+    )
+    db.commit()
+
+    result = hierarchy_epics(
+        db,
+        ["10732"],
+        '{"field_id":"tags","operator":"eq","value":"descendant-only"}',
+        0,
+        50,
+    )
+
+    assert result["matching_work_item_count"] == 1
+    assert result["total_count"] == 1
+    assert result["items"][0]["issue_key"] == "A-1"

@@ -65,6 +65,13 @@ class GroupByRequest(BaseModel):
     aggregation: str = "count"
 
 
+class CardSummaryRequest(BaseModel):
+    project_ids: list[str] | None = None
+    filters: dict[str, Any] | None = None
+    field_id: str
+    next_field_id: str | None = None
+
+
 class MetricConfigIn(BaseModel):
     name: str
     metric_type: str = "ratio"
@@ -82,3 +89,7 @@ class DashboardConfigIn(BaseModel):
     layout: dict[str, Any] = {}
     filters: dict[str, Any] | None = None
     shared: bool = False
+
+
+class TraceabilityConfigIn(BaseModel):
+    grouping_fields: list[str] = Field(min_length=1)
