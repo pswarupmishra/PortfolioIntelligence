@@ -7,6 +7,8 @@ from app.api import (
     get_sprint_grid_config,
     get_sprint_view_config,
     get_traceability_config,
+    grafana_traceability,
+    grafana_wbs,
     save_grid_config,
     save_sprint_grid_config,
     save_sprint_view_config,
@@ -14,7 +16,7 @@ from app.api import (
 )
 from app.db import Base
 from app.main import app
-from app.models import Issue, JiraField, JiraProject
+from app.models import Issue, IssueFieldValue, JiraField, JiraProject, TraceabilityConfig
 from app.schemas import GridConfigIn, SprintViewConfigIn, TraceabilityConfigIn
 
 
@@ -56,6 +58,38 @@ def test_traceability_configuration_is_persisted_per_project() -> None:
 def test_traceability_configuration_has_no_fixed_level_limit() -> None:
     fields = ["status_id", "issue_type_id", "assignee", "labels", "customfield_phase", "status_id"]
     assert TraceabilityConfigIn(grouping_fields=fields).grouping_fields == fields
+
+
+def test_grafana_traceability_exports_configured_node_graph_frames() -> None:
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+    db = Session(engine)
+    db.add(JiraProject(jira_project_id="10732", key="SDHI", name="Salem"))
+    db.add(JiraField(jira_field_id="labels", name="Labels", schema_json={"type": "array"}, is_custom=False))
+    db.add(TraceabilityConfig(project_jira_id="10732", grouping_fields_json=["labels"], level_captions_json=["Work group"]))
+    issue = Issue(jira_issue_id="1", issue_key="SDHI-1", project_jira_id="10732", summary="Example")
+    db.add(issue)
+    db.flush()
+    db.add(IssueFieldValue(issue_id=issue.id, jira_field_id="labels", element_index=0, value_type="string", string_value="delivery", raw_value_json="delivery"))
+    db.commit()
+
+    result = grafana_traceability("10732", db)
+
+    assert result["project"] == {"id": "10732", "key": "SDHI", "name": "Salem"}
+    assert result["view"] == "traceability_cards"
+    assert result["configuration"]["levels"] == [{"field_id": "labels", "caption": "Work group"}]
+    assert result["summary"] == {"issue_count": 1, "level_count": 1, "card_count": 1, "node_count": 1, "edge_count": 0}
+    assert result["nodes"][0]["title"] == "delivery"
+    assert result["nodes"][0]["subTitle"] == "Work group"
+    assert result["traceability"]["cards"][0]["metrics"]["task_count"] == 1
+    assert result["traceability"]["cards"][0]["work_items"][0]["issue_key"] == "SDHI-1"
+    assert result["grafana"]["recommended_visualizations"] == ["Node graph", "Table", "Stat"]
+
+    wbs = grafana_wbs("10732", db)
+    assert wbs["view"] == "wbs_flow"
+    assert wbs["configuration"]["levels"] == [{"field_id": "labels", "caption": "Work group"}]
+    assert wbs["summary"] == {"issue_count": 1, "node_count": 1, "edge_count": 0}
+    assert wbs["nodes"][0]["title"] == "delivery"
 
 
 def test_grid_configuration_is_project_specific_and_ordered() -> None:

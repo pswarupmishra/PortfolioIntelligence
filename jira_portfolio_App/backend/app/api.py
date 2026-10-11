@@ -351,6 +351,228 @@ def portfolio_wbs_flow(project_id: str, db: Db) -> dict[str, Any]:
     return AnalyticsService(db).wbs_flow(project_id, fields, captions)
 
 
+@router.get("/integrations/grafana/traceability/{project_id}", include_in_schema=False)
+@router.get("/integrations/grafana/traceability/cards/{project_id}")
+def grafana_traceability(
+    project_id: str,
+    db: Db,
+) -> dict[str, Any]:
+    project = db.scalar(select(JiraProject).where(JiraProject.jira_project_id == project_id))
+    if project is None:
+        raise HTTPException(404, "Project not found")
+    row = db.scalar(select(TraceabilityConfig).where(TraceabilityConfig.project_jira_id == project_id))
+    fields = row.grouping_fields_json if row else ["labels", "status_id", "issue_type_id"]
+    saved_captions = row.level_captions_json if row else []
+    discovered_names = {field.jira_field_id: field.name for field in db.scalars(select(JiraField))}
+    core_names = {"status_id": "Status", "issue_type_id": "Issue type", "assignee": "Assignee"}
+    captions = [
+        saved_captions[index].strip()
+        if index < len(saved_captions) and saved_captions[index].strip()
+        else core_names.get(field_id, discovered_names.get(field_id, field_id))
+        for index, field_id in enumerate(fields)
+    ]
+    levels = [{"field_id": field_id, "caption": captions[index]} for index, field_id in enumerate(fields)]
+    service = AnalyticsService(db)
+    status_by_id = {item.jira_status_id: item for item in db.scalars(select(JiraStatus))}
+    type_by_id = {item.jira_type_id: item for item in db.scalars(select(JiraIssueType))}
+    grid_row = db.scalar(select(GridConfig).where(GridConfig.project_jira_id == project_id))
+    grid_configuration = grid_config_dict(grid_row, project_id, db)
+    optional_field_ids = [item["field_id"] for item in grid_configuration["optional_fields"]]
+    nodes: list[dict[str, Any]] = []
+    edges: list[dict[str, Any]] = []
+    flat_cards: list[dict[str, Any]] = []
+
+    def combine_filter(parent_filter: dict[str, Any] | None, field_id: str, value: Any) -> dict[str, Any]:
+        current = (
+            {"field_id": field_id, "operator": "is_null", "value": True}
+            if value is None
+            else {"field_id": field_id, "operator": "eq", "value": value}
+        )
+        return {"and": [parent_filter, current]} if parent_filter else current
+
+    def work_item_dict(issue: Issue) -> dict[str, Any]:
+        status = status_by_id.get(issue.status_jira_id)
+        issue_type = type_by_id.get(issue.issue_type_jira_id)
+        return {
+            "jira_issue_id": issue.jira_issue_id,
+            "issue_key": issue.issue_key,
+            "summary": issue.summary,
+            "parent_jira_issue_id": issue.parent_jira_issue_id,
+            "issue_type": {
+                "id": issue.issue_type_jira_id,
+                "name": issue_type.name if issue_type else None,
+                "hierarchy_level": issue_type.hierarchy_level if issue_type else None,
+            },
+            "status": {
+                "id": issue.status_jira_id,
+                "name": status.name if status else None,
+                "category_key": status.category_key if status else None,
+            },
+            "baseline_due_at": issue.baseline_due_at,
+            "revised_due_at": issue.due_at,
+            "updated_at": issue.updated_at,
+            "configured_fields": {field_id: issue.raw_fields_json.get(field_id) for field_id in optional_field_ids},
+        }
+
+    def build_cards(
+        level: int,
+        parent_filter: dict[str, Any] | None = None,
+        parent_node_id: str | None = None,
+        path: list[dict[str, Any]] | None = None,
+    ) -> list[dict[str, Any]]:
+        field_id = fields[level]
+        next_field_id = fields[level + 1] if level + 1 < len(fields) else None
+        grouped = service.group_by(field_id, [project_id], parent_filter)
+        cards: list[dict[str, Any]] = []
+        for group in grouped["groups"]:
+            if not group["issue_count"]:
+                continue
+            card_filter = combine_filter(parent_filter, field_id, group["value"])
+            card_path = [*(path or []), {"field_id": field_id, "value": group["value"], "label": group["label"]}]
+            node_id = f"node-{len(nodes) + 1}"
+            metrics = service.card_summary([project_id], card_filter, next_field_id)
+            card: dict[str, Any] = {
+                "id": node_id,
+                "level": level,
+                "level_number": level + 1,
+                "field_id": field_id,
+                "caption": captions[level],
+                "value": group["value"],
+                "label": group["label"],
+                "issue_count": group["issue_count"],
+                "path": card_path,
+                "filter": card_filter,
+                "metrics": metrics,
+                "multi_value_groups_overlap": grouped["non_additive"],
+                "warnings": grouped["warnings"],
+            }
+            nodes.append(
+                {
+                    "id": node_id,
+                    "title": group["label"],
+                    "subTitle": captions[level],
+                    "mainStat": metrics["task_count"],
+                    "secondaryStat": group["issue_count"],
+                    "level": level,
+                    "field_id": field_id,
+                    "value": group["value"],
+                }
+            )
+            if parent_node_id:
+                edges.append(
+                    {
+                        "id": f"{parent_node_id}->{node_id}",
+                        "source": parent_node_id,
+                        "target": node_id,
+                        "mainStat": group["issue_count"],
+                    }
+                )
+            if next_field_id:
+                card["children"] = build_cards(level + 1, card_filter, node_id, card_path)
+            else:
+                issue_query = select(Issue).where(
+                    Issue.project_jira_id == project_id,
+                    Issue.is_deleted_or_inaccessible.is_(False),
+                    service.compile_filter(card_filter),
+                ).order_by(Issue.issue_key)
+                card["work_items"] = [work_item_dict(issue) for issue in db.scalars(issue_query)]
+            flat_cards.append({key: value for key, value in card.items() if key not in {"children", "work_items"}})
+            cards.append(card)
+        return cards
+
+    root_cards = build_cards(0) if fields else []
+    issue_count = service.count([project_id])
+    return {
+        "schema_version": "2.0",
+        "view": "traceability_cards",
+        "project": {"id": project.jira_project_id, "key": project.key, "name": project.name},
+        "configuration": {
+            "levels": levels,
+            "grid": grid_configuration,
+            "persisted": row is not None,
+            "updated_at": row.updated_at if row else None,
+        },
+        "summary": {
+            "issue_count": issue_count,
+            "level_count": len(levels),
+            "card_count": len(flat_cards),
+            "node_count": len(nodes),
+            "edge_count": len(edges),
+        },
+        "traceability": {"cards": root_cards, "flat_cards": flat_cards},
+        "nodes": nodes,
+        "edges": edges,
+        "sync_version": sync_version(db),
+        "grafana": {
+            "recommended_visualizations": ["Node graph", "Table", "Stat"],
+            "node_frame": "nodes",
+            "edge_frame": "edges",
+            "card_frame": "traceability.flat_cards",
+            "work_item_jsonpath": "$.traceability.cards..work_items[*]",
+            "refresh_after_sync": True,
+        },
+    }
+
+
+@router.get("/integrations/grafana/wbs/{project_id}")
+def grafana_wbs(project_id: str, db: Db) -> dict[str, Any]:
+    project = db.scalar(select(JiraProject).where(JiraProject.jira_project_id == project_id))
+    if project is None:
+        raise HTTPException(404, "Project not found")
+    row = db.scalar(select(TraceabilityConfig).where(TraceabilityConfig.project_jira_id == project_id))
+    fields = row.grouping_fields_json if row else ["labels", "status_id", "issue_type_id"]
+    saved_captions = row.level_captions_json if row else []
+    discovered_names = {field.jira_field_id: field.name for field in db.scalars(select(JiraField))}
+    core_names = {"status_id": "Status", "issue_type_id": "Issue type", "assignee": "Assignee"}
+    captions = [
+        saved_captions[index].strip()
+        if index < len(saved_captions) and saved_captions[index].strip()
+        else core_names.get(field_id, discovered_names.get(field_id, field_id))
+        for index, field_id in enumerate(fields)
+    ]
+    flow = AnalyticsService(db).wbs_flow(project_id, fields, captions)
+    nodes = [
+        {
+            "id": node["id"],
+            "title": node["label"],
+            "subTitle": captions[node["level"]],
+            "mainStat": node["value"],
+            "level": node["level"],
+            "field_id": fields[node["level"]],
+        }
+        for node in flow["nodes"]
+    ]
+    edges = [
+        {
+            "id": f'{edge["source"]}->{edge["target"]}',
+            "source": edge["source"],
+            "target": edge["target"],
+            "mainStat": edge["value"],
+        }
+        for edge in flow["links"]
+    ]
+    return {
+        "schema_version": "1.0",
+        "view": "wbs_flow",
+        "project": {"id": project.jira_project_id, "key": project.key, "name": project.name},
+        "configuration": {
+            "levels": flow["levels"],
+            "persisted": row is not None,
+            "updated_at": row.updated_at if row else None,
+        },
+        "summary": {"issue_count": flow["issue_count"], "node_count": len(nodes), "edge_count": len(edges)},
+        "nodes": nodes,
+        "edges": edges,
+        "sync_version": flow["sync_version"],
+        "grafana": {
+            "recommended_visualization": "Node graph",
+            "node_frame": "nodes",
+            "edge_frame": "edges",
+            "refresh_after_sync": True,
+        },
+    }
+
+
 @router.put("/admin/traceability-config/{project_id}", dependencies=[Depends(require_admin)])
 def save_traceability_config(project_id: str, update: TraceabilityConfigIn, db: Db) -> dict[str, Any]:
     if db.scalar(select(JiraProject).where(JiraProject.jira_project_id == project_id)) is None:
