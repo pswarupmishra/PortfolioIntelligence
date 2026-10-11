@@ -13,15 +13,35 @@ export type WbsFlow = {project_id: string; levels: {field_id: string; caption: s
 export type LiveIssueMetadata = {id?: string; key: string; self?: string; fields: Record<string, unknown>; names: Record<string, string>; schema: Record<string, Record<string, unknown>>}
 export type GridConfig = {project_id: string; mandatory_columns: string[]; optional_fields: {field_id: string; name: string}[]; updated_at: string | null; persisted: boolean}
 export type SprintViewConfig = {project_id: string; grouping_fields: string[]; level_captions: string[]; updated_at: string | null; persisted: boolean}
+export type AppUser = {id: number; username: string; display_name: string; role: 'admin' | 'user'; screen_permissions: string[]; active: boolean}
+export type UserPayload = {username: string; display_name: string; password?: string; role: 'admin' | 'user'; screen_permissions: string[]; active: boolean}
+
+const tokenKey = 'portfolio_intelligence_session'
+export const authToken = {
+  get: () => typeof localStorage === 'undefined' ? null : localStorage.getItem(tokenKey),
+  set: (token: string) => { if (typeof localStorage !== 'undefined') localStorage.setItem(tokenKey, token) },
+  clear: () => { if (typeof localStorage !== 'undefined') localStorage.removeItem(tokenKey) },
+}
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(`${baseUrl}${path}`, { ...init, headers: {'Content-Type': 'application/json', 'X-App-Role': 'admin', ...init?.headers} })
-  const body = await response.json()
-  if (!response.ok) throw new Error(body.message ?? body.detail ?? 'Request failed')
+  const token = authToken.get()
+  const response = await fetch(`${baseUrl}${path}`, { ...init, headers: {'Content-Type': 'application/json', ...(token ? {Authorization: `Bearer ${token}`} : {}), ...init?.headers} })
+  const body = response.status === 204 ? null : await response.json()
+  if (!response.ok) {
+    const errorBody = body as {message?: string; detail?: string} | null
+    throw new Error(errorBody?.message ?? errorBody?.detail ?? 'Request failed')
+  }
   return body as T
 }
 
 export const api = {
+  login: (username: string, password: string) => request<{token: string; expires_at: string; user: AppUser}>('/api/v1/auth/login', {method: 'POST', body: JSON.stringify({username, password})}),
+  me: () => request<AppUser>('/api/v1/auth/me'),
+  logout: () => request<void>('/api/v1/auth/logout', {method: 'POST'}),
+  users: () => request<{items: AppUser[]; screens: string[]}>('/api/v1/admin/users'),
+  createUser: (payload: UserPayload) => request<AppUser>('/api/v1/admin/users', {method: 'POST', body: JSON.stringify(payload)}),
+  updateUser: (id: number, payload: UserPayload) => request<AppUser>(`/api/v1/admin/users/${id}`, {method: 'PUT', body: JSON.stringify(payload)}),
+  deleteUser: (id: number) => request<void>(`/api/v1/admin/users/${id}`, {method: 'DELETE'}),
   health: () => request<{status: string; jira_configured: boolean}>('/api/v1/health/ready'),
   testConnection: () => request<Connection>('/api/v1/jira/test-connection', {method: 'POST'}),
   issueMetadata: (issueIdOrKey: string) => request<LiveIssueMetadata>(`/api/v1/jira/issues/${encodeURIComponent(issueIdOrKey)}/metadata`),
@@ -40,6 +60,7 @@ export const api = {
   saveSprintViewConfig: (projectId: string, groupingFields: string[], levelCaptions: string[]) => request<SprintViewConfig>(`/api/v1/admin/sprint-view-config/${encodeURIComponent(projectId)}`, {method: 'PUT', body: JSON.stringify({grouping_fields: groupingFields, level_captions: levelCaptions})}),
   selectProject: (id: string, selected: boolean) => request<Project>(`/api/v1/admin/projects/${encodeURIComponent(id)}`, {method: 'PUT', body: JSON.stringify({selected})}),
   selectField: (id: string, selected: boolean) => request<Field>(`/api/v1/admin/fields/${encodeURIComponent(id)}`, {method: 'PUT', body: JSON.stringify({selected})}),
+  selectFields: (fieldIds: string[], selected: boolean) => request<{updated_count: number; selected: boolean}>('/api/v1/admin/fields', {method: 'PUT', body: JSON.stringify({field_ids: fieldIds, selected})}),
   sync: ({mode, projectIds}: {mode: 'full' | 'incremental'; projectIds: string[]}) => request<SyncRun>('/api/v1/admin/sync', {method: 'POST', body: JSON.stringify({mode, project_ids: projectIds})}),
   syncStatus: () => request<{running: boolean; latest: SyncRun | null; sync_version: number}>('/api/v1/admin/sync/status'),
   roots: (projectId?: string) => request<Envelope<Issue>>(`/api/v1/hierarchy/roots?limit=25${projectId ? `&project_id=${encodeURIComponent(projectId)}` : ''}`),

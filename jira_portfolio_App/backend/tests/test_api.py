@@ -1,7 +1,10 @@
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session
 
+from app.api import (
+    fields as list_fields,
+)
 from app.api import (
     get_grid_config,
     get_sprint_grid_config,
@@ -13,11 +16,12 @@ from app.api import (
     save_sprint_grid_config,
     save_sprint_view_config,
     save_traceability_config,
+    select_fields,
 )
 from app.db import Base
 from app.main import app
-from app.models import Issue, IssueFieldValue, JiraField, JiraProject, TraceabilityConfig
-from app.schemas import GridConfigIn, SprintViewConfigIn, TraceabilityConfigIn
+from app.models import Issue, IssueFieldValue, JiraField, JiraFieldContext, JiraProject, TraceabilityConfig
+from app.schemas import FieldBulkSelection, GridConfigIn, SprintViewConfigIn, TraceabilityConfigIn
 
 
 def test_live_health() -> None:
@@ -60,6 +64,54 @@ def test_traceability_configuration_has_no_fixed_level_limit() -> None:
     assert TraceabilityConfigIn(grouping_fields=fields).grouping_fields == fields
 
 
+def test_bulk_field_selection_updates_only_requested_catalog_fields() -> None:
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+    db = Session(engine)
+    db.add_all(
+        [
+            JiraField(jira_field_id="labels", name="Labels", schema_json={"type": "array"}, is_custom=False),
+            JiraField(jira_field_id="assignee", name="Assignee", schema_json={"type": "user"}, is_custom=False),
+            JiraField(jira_field_id="summary", name="Summary", schema_json={"type": "string"}, is_custom=False),
+        ]
+    )
+    db.commit()
+
+    result = select_fields(FieldBulkSelection(field_ids=["labels", "assignee"], selected=True), db)
+
+    assert result == {"updated_count": 2, "selected": True}
+    assert db.scalar(select(JiraField).where(JiraField.jira_field_id == "labels")).selected is True
+    assert db.scalar(select(JiraField).where(JiraField.jira_field_id == "summary")).selected is False
+
+
+def test_project_field_catalog_excludes_permission_limited_custom_fields() -> None:
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+    db = Session(engine)
+    db.add(JiraProject(jira_project_id="10965", key="ATHP", name="Agile Template Hardware Project"))
+    db.add_all(
+        [
+            JiraField(jira_field_id="summary", name="Summary", schema_json={"type": "string"}, is_custom=False),
+            JiraField(jira_field_id="customfield_10815", name="Bluemingo Rule", schema_json={"type": "string"}, is_custom=True),
+        ]
+    )
+    db.add(
+        JiraFieldContext(
+            jira_field_id="customfield_10815",
+            context_id="permission-limited",
+            project_ids_json=[],
+            issue_type_ids_json=[],
+            availability="not_applicable",
+            message="This Jira field does not expose contexts",
+        )
+    )
+    db.commit()
+
+    result = list_fields(db, project_id="10965", limit=500, cursor=0)
+
+    assert [field.jira_field_id for field in result.items] == ["summary"]
+
+
 def test_grafana_traceability_exports_configured_node_graph_frames() -> None:
     engine = create_engine("sqlite://")
     Base.metadata.create_all(engine)
@@ -70,7 +122,16 @@ def test_grafana_traceability_exports_configured_node_graph_frames() -> None:
     issue = Issue(jira_issue_id="1", issue_key="SDHI-1", project_jira_id="10732", summary="Example")
     db.add(issue)
     db.flush()
-    db.add(IssueFieldValue(issue_id=issue.id, jira_field_id="labels", element_index=0, value_type="string", string_value="delivery", raw_value_json="delivery"))
+    db.add(
+        IssueFieldValue(
+            issue_id=issue.id,
+            jira_field_id="labels",
+            element_index=0,
+            value_type="string",
+            string_value="delivery",
+            raw_value_json="delivery",
+        )
+    )
     db.commit()
 
     result = grafana_traceability("10732", db)

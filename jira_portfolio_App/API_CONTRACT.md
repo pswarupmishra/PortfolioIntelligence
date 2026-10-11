@@ -7,6 +7,7 @@ Return consistent envelopes for paginated lists: `{items, next_cursor, total_cou
 - `GET /api/v1/jira/projects` (authorized scope).
 - `POST /api/v1/admin/metadata/refresh` (admin).
 - `GET /api/v1/metadata/fields?project_id=&issue_type_id=&search=`.
+- `PUT /api/v1/admin/fields` (admin) body `{field_ids,selected}` for filtered bulk inclusion/exclusion.
 - `GET /api/v1/metadata/fields/{field_id}/options`.
 - `GET /api/v1/metadata/issue-types`, `GET /api/v1/metadata/statuses`.
 
@@ -22,6 +23,8 @@ Return consistent envelopes for paginated lists: `{items, next_cursor, total_cou
 - `GET /api/v1/hierarchy/anomalies` — cycles, missing parents, unexpected levels.
 
 ## Configuration and operations
+- `POST /api/v1/auth/login`; `GET /api/v1/auth/me`; `POST /api/v1/auth/logout`.
+- `GET/POST /api/v1/admin/users`; `PUT/DELETE /api/v1/admin/users/{id}` (admin) for local accounts and screen permissions.
 - `GET/POST /api/v1/dashboards`; `GET/PUT/DELETE /api/v1/dashboards/{id}`.
 - `GET/POST /api/v1/metrics`; `GET/PUT/DELETE /api/v1/metrics/{id}`.
 - `POST /api/v1/admin/sync` (admin, async enqueue).

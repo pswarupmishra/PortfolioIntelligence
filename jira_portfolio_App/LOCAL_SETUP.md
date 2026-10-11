@@ -179,6 +179,15 @@ Open:
 - FastAPI documentation: `http://127.0.0.1:8000/docs`
 - Backend readiness check: `http://127.0.0.1:8000/api/v1/health/ready`
 
+On the first start, sign in with the bootstrap local administrator:
+
+```text
+Username: admin
+Password: Pass@1237
+```
+
+Immediately open **App Setting → Configuration → User management**, edit the administrator, and set a private password. Passwords are stored in SQLite as PBKDF2-SHA256 hashes; plaintext passwords are never stored.
+
 Stop both services with `Ctrl+C` in the terminal running `make dev`.
 
 ### Run the services in separate terminals
@@ -228,7 +237,11 @@ In the application:
 6. Run **Full sync** for the initial data load.
 7. Wait for the sync to finish and confirm the fetched issue count.
 8. Configure **Traceability configuration**, **Sprint View configuration**, and **Grid configuration** as required.
-9. Open Portfolio View or Execution View and select the project.
+9. In **Jira connection**, optionally check one project to scope the Field Catalog to fields Jira marks applicable to that project. Use Field type and Sync status filters, then use **Include all** or **Exclude all** to update only the filtered results.
+10. Run a Full sync after changing included fields so existing issues receive those values.
+11. Open **User management** to add local users. Assign each standard user only the screens they require; administrators always receive all screens.
+12. Open Overview and select a project card to open its project-specific WBS flow. Validate Traceability and Sprint View separately.
+13. Use the floating **Aa** control to choose Default, Comfortable, or Large application text. The preference is retained by the browser.
 
 Use **Incremental sync** after the initial full sync. Periodically run a full sync so issues deleted from Jira or no longer accessible can be reconciled locally.
 
@@ -319,4 +332,6 @@ Running `make migrate` after every pull safely applies newly added schema migrat
 - Use a dedicated Jira service account with read-only access where possible.
 - Revoke exposed tokens immediately.
 - Do not expose the development server directly to the internet.
-- Replace the development `X-App-Role` boundary with trusted SSO or proxy authentication before production deployment.
+- Change the bootstrap administrator password immediately.
+- Deactivate or delete accounts that are no longer required.
+- Local sessions expire after 12 hours. Use trusted SSO or proxy authentication before an enterprise production deployment.

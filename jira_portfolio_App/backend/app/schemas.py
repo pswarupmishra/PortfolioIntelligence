@@ -53,6 +53,11 @@ class SelectionUpdate(BaseModel):
     selected: bool
 
 
+class FieldBulkSelection(BaseModel):
+    field_ids: list[str] = Field(min_length=1, max_length=500)
+    selected: bool
+
+
 class SyncRequest(BaseModel):
     mode: str = "incremental"
     project_ids: list[str] | None = None
@@ -103,3 +108,17 @@ class GridConfigIn(BaseModel):
 class SprintViewConfigIn(BaseModel):
     grouping_fields: list[str] = Field(min_length=1)
     level_captions: list[str] = Field(default_factory=list)
+
+
+class LoginIn(BaseModel):
+    username: str = Field(min_length=1, max_length=100)
+    password: str = Field(min_length=1, max_length=256)
+
+
+class UserIn(BaseModel):
+    username: str = Field(min_length=3, max_length=100, pattern=r"^[A-Za-z0-9._-]+$")
+    display_name: str = Field(min_length=1, max_length=200)
+    password: str | None = Field(default=None, min_length=8, max_length=256)
+    role: str = "user"
+    screen_permissions: list[str] = Field(default_factory=list)
+    active: bool = True

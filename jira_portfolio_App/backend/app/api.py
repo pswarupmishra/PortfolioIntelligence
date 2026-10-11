@@ -2,16 +2,19 @@ import json
 from collections.abc import AsyncIterator
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Query
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Response
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from .analytics import AnalyticsService, FilterValidationError
+from .auth import ALL_SCREENS, authenticate_token, ensure_default_admin, hash_password, issue_session, public_user, verify_password
 from .config import Settings, get_settings
 from .db import get_db
 from .jira import JiraClient
 from .metadata import MetadataService
 from .models import (
+    AppSession,
+    AppUser,
     DashboardConfig,
     GridConfig,
     HierarchyAnomaly,
@@ -33,11 +36,13 @@ from .models import (
 from .schemas import (
     CardSummaryRequest,
     DashboardConfigIn,
+    FieldBulkSelection,
     FieldOut,
     GridConfigIn,
     GroupByRequest,
     IssueTypeOut,
     ListEnvelope,
+    LoginIn,
     MetricConfigIn,
     ProjectOut,
     SelectionUpdate,
@@ -45,6 +50,7 @@ from .schemas import (
     StatusOut,
     SyncRequest,
     TraceabilityConfigIn,
+    UserIn,
 )
 from .sync import SyncBusyError, SyncService, sync_version
 
@@ -52,9 +58,128 @@ router = APIRouter(prefix="/api/v1")
 Db = Annotated[Session, Depends(get_db)]
 
 
-def require_admin(x_app_role: Annotated[str | None, Header()] = None) -> None:
-    if x_app_role != "admin":
-        raise HTTPException(status_code=403, detail="Admin role required")
+def current_user(db: Db, authorization: Annotated[str | None, Header()] = None) -> AppUser:
+    return authenticate_token(db, authorization)
+
+
+def require_admin(
+    db: Db,
+    authorization: Annotated[str | None, Header()] = None,
+    x_app_role: Annotated[str | None, Header()] = None,
+) -> AppUser | None:
+    # X-App-Role remains only for backwards-compatible local tests and scripts.
+    if authorization:
+        user = authenticate_token(db, authorization)
+        if user.role != "admin":
+            raise HTTPException(status_code=403, detail="Administrator access required")
+        return user
+    if x_app_role == "admin":
+        return None
+    raise HTTPException(status_code=403, detail="Administrator access required")
+
+
+@router.post("/auth/login")
+def login(payload: LoginIn, db: Db) -> dict[str, Any]:
+    ensure_default_admin(db)
+    user = db.scalar(select(AppUser).where(func.lower(AppUser.username) == payload.username.strip().lower()))
+    if user is None or not user.active or not verify_password(payload.password, user.password_hash):
+        raise HTTPException(status_code=401, detail="Invalid username or password")
+    token, expires_at = issue_session(db, user)
+    return {"token": token, "expires_at": expires_at, "user": public_user(user)}
+
+
+@router.get("/auth/me")
+def me(user: Annotated[AppUser, Depends(current_user)]) -> dict[str, object]:
+    return public_user(user)
+
+
+@router.post("/auth/logout", status_code=204)
+def logout(
+    db: Db,
+    user: Annotated[AppUser, Depends(current_user)],
+    authorization: Annotated[str | None, Header()] = None,
+) -> Response:
+    del user
+    if authorization:
+        import hashlib
+
+        token_hash = hashlib.sha256(authorization[7:].encode()).hexdigest()
+        session = db.scalar(select(AppSession).where(AppSession.token_hash == token_hash))
+        if session:
+            db.delete(session)
+            db.commit()
+    return Response(status_code=204)
+
+
+@router.get("/admin/users", dependencies=[Depends(require_admin)])
+def list_users(db: Db) -> dict[str, Any]:
+    ensure_default_admin(db)
+    users = list(db.scalars(select(AppUser).order_by(AppUser.username)))
+    return {"items": [public_user(user) for user in users], "screens": ALL_SCREENS}
+
+
+def validate_user_input(payload: UserIn) -> None:
+    if payload.role not in {"admin", "user"}:
+        raise HTTPException(status_code=422, detail="Role must be admin or user")
+    invalid = sorted(set(payload.screen_permissions) - set(ALL_SCREENS))
+    if invalid:
+        raise HTTPException(status_code=422, detail=f"Unknown screen permissions: {', '.join(invalid)}")
+
+
+@router.post("/admin/users", dependencies=[Depends(require_admin)], status_code=201)
+def create_user(payload: UserIn, db: Db) -> dict[str, object]:
+    validate_user_input(payload)
+    if not payload.password:
+        raise HTTPException(status_code=422, detail="Password is required for a new user")
+    username = payload.username.strip().lower()
+    if db.scalar(select(AppUser).where(AppUser.username == username)):
+        raise HTTPException(status_code=409, detail="Username already exists")
+    user = AppUser(
+        username=username,
+        display_name=payload.display_name.strip(),
+        password_hash=hash_password(payload.password),
+        role=payload.role,
+        screen_permissions_json=ALL_SCREENS if payload.role == "admin" else payload.screen_permissions,
+        active=payload.active,
+    )
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+    return public_user(user)
+
+
+@router.put("/admin/users/{user_id}", dependencies=[Depends(require_admin)])
+def update_user(user_id: int, payload: UserIn, db: Db) -> dict[str, object]:
+    validate_user_input(payload)
+    user = db.get(AppUser, user_id)
+    if user is None:
+        raise HTTPException(status_code=404, detail="User not found")
+    username = payload.username.strip().lower()
+    duplicate = db.scalar(select(AppUser).where(AppUser.username == username, AppUser.id != user_id))
+    if duplicate:
+        raise HTTPException(status_code=409, detail="Username already exists")
+    user.username = username
+    user.display_name = payload.display_name.strip()
+    user.role = payload.role
+    user.screen_permissions_json = ALL_SCREENS if payload.role == "admin" else payload.screen_permissions
+    user.active = payload.active
+    if payload.password:
+        user.password_hash = hash_password(payload.password)
+    db.commit()
+    db.refresh(user)
+    return public_user(user)
+
+
+@router.delete("/admin/users/{user_id}", dependencies=[Depends(require_admin)], status_code=204)
+def delete_user(user_id: int, db: Db) -> Response:
+    user = db.get(AppUser, user_id)
+    if user is None:
+        raise HTTPException(status_code=404, detail="User not found")
+    if user.username == "admin":
+        raise HTTPException(status_code=400, detail="The default administrator cannot be deleted")
+    db.delete(user)
+    db.commit()
+    return Response(status_code=204)
 
 
 async def jira_client(settings: Annotated[Settings, Depends(get_settings)]) -> AsyncIterator[JiraClient]:
@@ -391,8 +516,8 @@ def grafana_traceability(
         return {"and": [parent_filter, current]} if parent_filter else current
 
     def work_item_dict(issue: Issue) -> dict[str, Any]:
-        status = status_by_id.get(issue.status_jira_id)
-        issue_type = type_by_id.get(issue.issue_type_jira_id)
+        status = status_by_id.get(issue.status_jira_id) if issue.status_jira_id else None
+        issue_type = type_by_id.get(issue.issue_type_jira_id) if issue.issue_type_jira_id else None
         return {
             "jira_issue_id": issue.jira_issue_id,
             "issue_key": issue.issue_key,
@@ -612,17 +737,15 @@ def fields(
     if search:
         query = query.where(or_(JiraField.name.ilike(f"%{search}%"), JiraField.jira_field_id.ilike(f"%{search}%")))
     if project_id or issue_type_id:
-        scope = select(JiraFieldContext.jira_field_id)
-        contexts = list(db.scalars(scope))
-        allowed = []
-        for field_id in contexts:
-            context_rows = db.scalars(select(JiraFieldContext).where(JiraFieldContext.jira_field_id == field_id))
-            if any(
-                (not project_id or not row.project_ids_json or project_id in row.project_ids_json)
-                and (not issue_type_id or not row.issue_type_ids_json or issue_type_id in row.issue_type_ids_json)
-                for row in context_rows
+        allowed = applicable_grid_field_ids(project_id, db) if project_id else set()
+        context_rows = db.scalars(select(JiraFieldContext))
+        for row in context_rows:
+            if row.availability != "available":
+                continue
+            if (not project_id or not row.project_ids_json or project_id in row.project_ids_json) and (
+                not issue_type_id or not row.issue_type_ids_json or issue_type_id in row.issue_type_ids_json
             ):
-                allowed.append(field_id)
+                allowed.add(row.jira_field_id)
         query = query.where(or_(JiraField.is_custom.is_(False), JiraField.jira_field_id.in_(allowed)))
     total = db.scalar(select(func.count()).select_from(query.subquery())) or 0
     rows = list(db.scalars(query.order_by(JiraField.name).offset(cursor).limit(limit)))
@@ -640,6 +763,17 @@ def select_field(jira_field_id: str, update: SelectionUpdate, db: Db) -> FieldOu
     row.selected = update.selected
     db.commit()
     return FieldOut.model_validate(row)
+
+
+@router.put("/admin/fields", dependencies=[Depends(require_admin)])
+def select_fields(update: FieldBulkSelection, db: Db) -> dict[str, int | bool]:
+    rows = list(db.scalars(select(JiraField).where(JiraField.jira_field_id.in_(set(update.field_ids)))))
+    if len(rows) != len(set(update.field_ids)):
+        raise HTTPException(422, "One or more fields were not found")
+    for row in rows:
+        row.selected = update.selected
+    db.commit()
+    return {"updated_count": len(rows), "selected": update.selected}
 
 
 @router.get("/metadata/fields/{field_id}/options")

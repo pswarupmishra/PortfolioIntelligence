@@ -20,6 +20,11 @@ Phase 0 through Phase 3 provide a runnable React/FastAPI application for securel
 - Portfolio KPIs for total work, leaf completion, overdue, and unassigned items with visible numerators, denominators, null counts, warnings, freshness, and sync version.
 - Due-date changelog synchronization for Jira's standard `duedate` field, preserving the first assigned date as an immutable baseline. Card summaries distinguish baseline delayed, revised on-track, and revised delayed open leaf tasks.
 - Persisted metric definitions and dashboard configurations with field/filter validation and CRUD APIs.
+- Local SQLite user management with PBKDF2-SHA256 password hashing, 12-hour bearer sessions, administrator/user roles, and per-screen navigation access.
+- Project-scoped field catalogs using available Jira field contexts plus observed synchronized project fields; permission-limited contexts are not treated as globally applicable.
+- Project and field filters with filtered Include-all/Exclude-all synchronization controls.
+- Persistent application-wide Default, Comfortable, and Large text modes.
+- Clickable Overview project snapshots that open WBS with the selected Jira project.
 - Mocked tests for paging, 401/403, 429 retry/exhaustion, metadata persistence, renamed custom fields, and basic API authorization/health.
 
 Historical trend snapshots and Phase 4's full interactive dashboard builder are intentionally not included yet.
@@ -55,7 +60,7 @@ Start both services with:
 make dev
 ```
 
-Then open `http://localhost:5173`. The API is at `http://localhost:8000`, with Swagger UI at `http://localhost:8000/docs`.
+Then open `http://localhost:5173`. Sign in initially as `admin` with password `Pass@1237`, then change that password in User management. The API is at `http://localhost:8000`, with Swagger UI at `http://localhost:8000/docs`.
 
 Alternatively run `make backend` and `make frontend` in separate terminals. The development UI sends `X-App-Role: admin`; production deployment must replace this Phase 1 role boundary with trusted proxy/SSO authentication as described in `ARCHITECTURE.md`.
 
@@ -89,7 +94,7 @@ Run only the backend tests with `cd backend && pytest`. Tests use mocked Jira re
 - `GET/POST/PUT/DELETE /api/v1/metrics` and `/api/v1/dashboards`
 - `GET /api/v1/health/live` and `/api/v1/health/ready`
 
-Admin endpoints require `X-App-Role: admin` in Phase 1. Metadata list responses use the documented `{items,next_cursor,total_count,sync_version}` envelope.
+The frontend authenticates with a local session token. Administrator endpoints verify the signed-in user's role. Metadata list responses use the documented `{items,next_cursor,total_count,sync_version}` envelope.
 
 ## Known Phase 1 limitations
 
