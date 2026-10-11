@@ -1,6 +1,6 @@
 .data-model-layout{grid-template-columns:minmax(0,1fr);width:100%}
 .model-canvas,.model-inspector{width:100%}
-.model-inspector{display:grid;grid-template-columns:240px minmax(0,1fr) minmax(280px,.8fr);align-items:start}
+.model-inspector{display:grid;grid-template-columns:240px minmax(0,1fr) minmax(280px,.8fr);align-items:start;position:static;width:100%;height:auto;padding:0;color:inherit}
 .model-inspector>div:first-child{height:100%;border-right:1px solid #e7ebf2;border-bottom:0}
 .model-columns{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));max-height:260px}
 .model-columns>div{border-right:1px solid #edf0f5}
