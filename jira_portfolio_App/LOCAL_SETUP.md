@@ -26,10 +26,10 @@ npm --version
 
 ```bash
 git clone https://github.com/pswarupmishra/PortfolioIntelligence.git
-cd PortfolioIntelligence/jira_portfolio_codex
+cd PortfolioIntelligence/jira_portfolio_App
 ```
 
-All remaining commands in this guide assume that the current directory is `jira_portfolio_codex`.
+All remaining commands in this guide assume that the current directory is `jira_portfolio_App`.
 
 ## 3. Create the Python virtual environment
 
@@ -115,7 +115,7 @@ DATABASE_URL=sqlite:///./jira_portfolio.db
 Because backend commands run from the `backend` directory, this creates:
 
 ```text
-jira_portfolio_codex/backend/jira_portfolio.db
+jira_portfolio_App/backend/jira_portfolio.db
 ```
 
 SQLite does not require a separate database server, username, or password. The application enables foreign keys and WAL mode automatically.
@@ -186,7 +186,7 @@ Stop both services with `Ctrl+C` in the terminal running `make dev`.
 Terminal 1:
 
 ```bash
-cd jira_portfolio_codex
+cd jira_portfolio_App
 source .venv/bin/activate
 make backend
 ```
@@ -194,7 +194,7 @@ make backend
 Terminal 2:
 
 ```bash
-cd jira_portfolio_codex
+cd jira_portfolio_App
 source .venv/bin/activate
 make frontend
 ```
@@ -277,7 +277,7 @@ Running `make migrate` after every pull safely applies newly added schema migrat
 
 ### `Jira credentials are not configured`
 
-- Confirm that `.env` is located in `jira_portfolio_codex/.env`.
+- Confirm that `.env` is located in `jira_portfolio_App/.env`.
 - Confirm all three variables are present: `JIRA_BASE_URL`, `JIRA_EMAIL`, and `JIRA_API_TOKEN`.
 - Restart FastAPI after changing `.env`.
 

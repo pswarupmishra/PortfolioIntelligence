@@ -4,9 +4,11 @@ from sqlalchemy.orm import Session
 
 from app.api import (
     get_grid_config,
+    get_sprint_grid_config,
     get_sprint_view_config,
     get_traceability_config,
     save_grid_config,
+    save_sprint_grid_config,
     save_sprint_view_config,
     save_traceability_config,
 )
@@ -84,6 +86,10 @@ def test_grid_configuration_is_project_specific_and_ordered() -> None:
     assert get_grid_config("10732", db)["mandatory_columns"] == [
         "key", "summary", "issue_type", "baseline_due", "revised_due", "status"
     ]
+    sprint_saved = save_sprint_grid_config("10732", GridConfigIn(optional_fields=["labels"]), db)
+    assert [field["field_id"] for field in sprint_saved["optional_fields"]] == ["labels"]
+    assert [field["field_id"] for field in get_grid_config("10732", db)["optional_fields"]] == ["assignee", "labels"]
+    assert [field["field_id"] for field in get_sprint_grid_config("10732", db)["optional_fields"]] == ["labels"]
 
 
 def test_sprint_view_configuration_uses_applicable_project_fields_and_captions() -> None:

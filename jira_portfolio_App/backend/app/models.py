@@ -225,6 +225,14 @@ class GridConfig(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
 
 
+class SprintGridConfig(Base):
+    __tablename__ = "sprint_grid_configs"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    project_jira_id: Mapped[str] = mapped_column(ForeignKey("jira_projects.jira_project_id", ondelete="CASCADE"), unique=True, index=True)
+    optional_fields_json: Mapped[list[str]] = mapped_column(JSON, default=list)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+
 class SprintViewConfig(Base):
     __tablename__ = "sprint_view_configs"
     id: Mapped[int] = mapped_column(primary_key=True)

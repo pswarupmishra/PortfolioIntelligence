@@ -25,6 +25,7 @@ from .models import (
     JiraStatus,
     MetadataRefresh,
     MetricDefinition,
+    SprintGridConfig,
     SprintViewConfig,
     SyncRun,
     TraceabilityConfig,
@@ -178,6 +179,21 @@ def grid_config_dict(row: GridConfig | None, project_id: str, db: Session) -> di
     }
 
 
+def sprint_grid_config_dict(row: SprintGridConfig | None, project_id: str, db: Session) -> dict[str, Any]:
+    optional_fields = row.optional_fields_json if row else []
+    names = {
+        field.jira_field_id: field.name
+        for field in db.scalars(select(JiraField).where(JiraField.jira_field_id.in_(optional_fields)))
+    }
+    return {
+        "project_id": project_id,
+        "mandatory_columns": MANDATORY_GRID_COLUMNS,
+        "optional_fields": [{"field_id": field_id, "name": names.get(field_id, field_id)} for field_id in optional_fields],
+        "updated_at": row.updated_at if row else None,
+        "persisted": row is not None,
+    }
+
+
 def default_sprint_fields(db: Session) -> list[str]:
     sprint = db.scalar(select(JiraField).where(func.lower(JiraField.name) == "sprint"))
     return [sprint.jira_field_id, "status_id", "issue_type_id"] if sprint else ["status_id", "issue_type_id"]
@@ -274,6 +290,39 @@ def save_grid_config(project_id: str, update: GridConfigIn, db: Db) -> dict[str,
     db.commit()
     db.refresh(row)
     return grid_config_dict(row, project_id, db)
+
+
+@router.get("/sprint-grid-config/{project_id}")
+def get_sprint_grid_config(project_id: str, db: Db) -> dict[str, Any]:
+    if db.scalar(select(JiraProject).where(JiraProject.jira_project_id == project_id)) is None:
+        raise HTTPException(404, "Project not found")
+    row = db.scalar(select(SprintGridConfig).where(SprintGridConfig.project_jira_id == project_id))
+    return sprint_grid_config_dict(row, project_id, db)
+
+
+@router.put("/admin/sprint-grid-config/{project_id}", dependencies=[Depends(require_admin)])
+def save_sprint_grid_config(project_id: str, update: GridConfigIn, db: Db) -> dict[str, Any]:
+    if db.scalar(select(JiraProject).where(JiraProject.jira_project_id == project_id)) is None:
+        raise HTTPException(404, "Project not found")
+    if len(update.optional_fields) != len(set(update.optional_fields)):
+        raise HTTPException(422, "Grid fields must be unique")
+    discovered = set(db.scalars(select(JiraField.jira_field_id)))
+    unknown = [field_id for field_id in update.optional_fields if field_id not in discovered]
+    if unknown:
+        raise HTTPException(422, f"Unknown grid fields: {', '.join(unknown)}")
+    applicable = applicable_grid_field_ids(project_id, db)
+    invalid = [field_id for field_id in update.optional_fields if field_id not in applicable]
+    if invalid:
+        raise HTTPException(422, f"Fields are not applicable to this project: {', '.join(invalid)}")
+    row = db.scalar(select(SprintGridConfig).where(SprintGridConfig.project_jira_id == project_id))
+    if row is None:
+        row = SprintGridConfig(project_jira_id=project_id, optional_fields_json=update.optional_fields)
+        db.add(row)
+    else:
+        row.optional_fields_json = update.optional_fields
+    db.commit()
+    db.refresh(row)
+    return sprint_grid_config_dict(row, project_id, db)
 
 
 @router.get("/traceability-config/{project_id}")
@@ -484,7 +533,13 @@ def issue_dict(issue: Issue, db: Session, include_fields: bool = False) -> dict[
         "is_deleted_or_inaccessible": issue.is_deleted_or_inaccessible,
     }
     grid_config = db.scalar(select(GridConfig).where(GridConfig.project_jira_id == issue.project_jira_id))
-    configured_fields = grid_config.optional_fields_json if grid_config else []
+    sprint_grid_config = db.scalar(select(SprintGridConfig).where(SprintGridConfig.project_jira_id == issue.project_jira_id))
+    configured_fields = list(
+        dict.fromkeys(
+            (grid_config.optional_fields_json if grid_config else [])
+            + (sprint_grid_config.optional_fields_json if sprint_grid_config else [])
+        )
+    )
     result["configured_fields"] = {field_id: issue.raw_fields_json.get(field_id) for field_id in configured_fields}
     if include_fields:
         values = list(
