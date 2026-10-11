@@ -35,6 +35,8 @@ Issue synchronization also uses `POST /rest/api/3/changelog/bulkfetch`, filtered
 
 ## Local setup
 
+For a complete first-time installation walkthrough—including `.env`, Jira credentials, SQLite creation, migrations, startup, first sync, updates, and troubleshooting—see [LOCAL_SETUP.md](LOCAL_SETUP.md).
+
 ```bash
 cp .env.example .env
 # Edit .env with your Jira Cloud URL, service-account email, and API token.
