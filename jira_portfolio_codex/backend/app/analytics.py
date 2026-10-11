@@ -1,4 +1,6 @@
+from collections import defaultdict
 from datetime import datetime, timezone
+from itertools import product
 from typing import Any
 
 from sqlalchemy import String, and_, cast, distinct, exists, func, not_, or_, select
@@ -164,6 +166,99 @@ class AnalyticsService:
         query = self.base_query(project_ids, filters).subquery()
         return self.db.scalar(select(func.count(distinct(query.c.id)))) or 0
 
+    def wbs_flow(self, project_id: str, fields: list[str], captions: list[str], max_nodes_per_level: int = 12) -> dict[str, Any]:
+        issues = list(
+            self.db.scalars(
+                select(Issue).where(Issue.project_jira_id == project_id, Issue.is_deleted_or_inaccessible.is_(False))
+            )
+        )
+        status_labels = {row.jira_status_id: row.name for row in self.db.scalars(select(JiraStatus))}
+        type_labels = {row.jira_type_id: row.name for row in self.db.scalars(select(JiraIssueType))}
+        issue_ids = [issue.id for issue in issues]
+        field_rows = list(
+            self.db.scalars(
+                select(IssueFieldValue).where(
+                    IssueFieldValue.issue_id.in_(issue_ids), IssueFieldValue.jira_field_id.in_(fields)
+                )
+            )
+        ) if issue_ids else []
+        stored_values: dict[tuple[int, str], list[tuple[str, str]]] = defaultdict(list)
+        for row in field_rows:
+            value = row.option_id or row.string_value or (str(row.number_value) if row.number_value is not None else None)
+            label = row.string_value or row.option_id or value
+            if value is not None:
+                stored_values[(row.issue_id, row.jira_field_id)].append((value, label or value))
+
+        issue_paths: list[tuple[int, list[list[tuple[str, str]]]]] = []
+        level_members: list[dict[tuple[str, str], set[int]]] = [defaultdict(set) for _ in fields]
+        for issue in issues:
+            levels: list[list[tuple[str, str]]] = []
+            for index, field_id in enumerate(fields):
+                values: list[tuple[str, str]]
+                if field_id == "status_id":
+                    status_id = issue.status_jira_id
+                    values = (
+                        [(status_id, status_labels.get(status_id, status_id))]
+                        if status_id
+                        else []
+                    )
+                elif field_id == "issue_type_id":
+                    issue_type_id = issue.issue_type_jira_id
+                    values = (
+                        [(issue_type_id, type_labels.get(issue_type_id, issue_type_id))]
+                        if issue_type_id
+                        else []
+                    )
+                elif field_id == "assignee":
+                    assignee_id = issue.assignee_account_id
+                    values = [(assignee_id, assignee_id)] if assignee_id else []
+                else:
+                    values = stored_values.get((issue.id, field_id), [])
+                unique_values = list(dict.fromkeys(values or [("__null__", "No value")]))
+                levels.append(unique_values)
+                for value_pair in unique_values:
+                    level_members[index][value_pair].add(issue.id)
+            issue_paths.append((issue.id, levels))
+
+        keep_by_level: list[set[tuple[str, str]]] = []
+        for members in level_members:
+            ranked = sorted(members, key=lambda value: (-len(members[value]), value[1]))
+            keep_by_level.append(set(ranked[: max(1, max_nodes_per_level - 1)]))
+
+        def compact(level: int, value: tuple[str, str]) -> tuple[str, str]:
+            return value if value in keep_by_level[level] else ("__other__", "Other")
+
+        node_members: dict[tuple[int, str, str], set[int]] = defaultdict(set)
+        link_members: dict[tuple[tuple[int, str, str], tuple[int, str, str]], set[int]] = defaultdict(set)
+        for issue_id, levels in issue_paths:
+            compacted = [[compact(index, value) for value in values] for index, values in enumerate(levels)]
+            for level, values in enumerate(compacted):
+                for value, label in set(values):
+                    node_members[(level, value, label)].add(issue_id)
+            for level in range(len(compacted) - 1):
+                for source, target in product(set(compacted[level]), set(compacted[level + 1])):
+                    link_members[((level, source[0], source[1]), (level + 1, target[0], target[1]))].add(issue_id)
+
+        def node_id(key: tuple[int, str, str]) -> str:
+            return f"{key[0]}:{key[1]}"
+        return {
+            "project_id": project_id,
+            "levels": [
+                {"field_id": field, "caption": captions[index] if index < len(captions) and captions[index] else field}
+                for index, field in enumerate(fields)
+            ],
+            "nodes": [
+                {"id": node_id(key), "label": key[2], "level": key[0], "value": len(members)}
+                for key, members in node_members.items()
+            ],
+            "links": [
+                {"source": node_id(source), "target": node_id(target), "value": len(members)}
+                for (source, target), members in link_members.items()
+            ],
+            "issue_count": len(issues),
+            "sync_version": sync_version(self.db),
+        }
+
     def summary(self, project_ids: list[str] | None = None, filters: dict[str, Any] | None = None) -> dict[str, Any]:
         scope_ids = self.base_query(project_ids, filters).subquery()
         total = self.db.scalar(select(func.count(distinct(scope_ids.c.id)))) or 0
@@ -226,7 +321,7 @@ class AnalyticsService:
             "sync_version": sync_version(self.db),
         }
 
-    def card_summary(self, project_ids: list[str] | None, filters: dict[str, Any], next_field_id: str | None = None) -> dict[str, int]:
+    def card_summary(self, project_ids: list[str] | None, filters: dict[str, Any], next_field_id: str | None = None) -> dict[str, Any]:
         scope_ids = self.base_query(project_ids, filters).subquery()
         children = aliased(Issue)
         leaves = (
@@ -300,6 +395,8 @@ class AnalyticsService:
             )
             or 0
         )
+        baseline_due_at = self.db.scalar(select(func.max(Issue.baseline_due_at)).where(Issue.id.in_(select(leaves.c.id))))
+        latest_due_at = self.db.scalar(select(func.max(Issue.due_at)).where(Issue.id.in_(select(leaves.c.id))))
         next_groups = 0
         if next_field_id:
             next_groups = sum(1 for group in self.group_by(next_field_id, project_ids, filters)["groups"] if group["issue_count"])
@@ -310,6 +407,8 @@ class AnalyticsService:
             "on_track_count": on_track,
             "delayed_count": delayed,
             "no_due_date_count": no_due_date,
+            "baseline_due_date": baseline_due_at.isoformat() if baseline_due_at else None,
+            "latest_due_date": latest_due_at.isoformat() if latest_due_at else None,
             "next_group_count": next_groups,
         }
 

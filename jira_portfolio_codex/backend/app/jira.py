@@ -112,6 +112,15 @@ class JiraClient:
         data = await self.request("GET", "/rest/api/3/status")
         return data if isinstance(data, list) else data.get("values", [])
 
+    async def issue_metadata(self, issue_id_or_key: str) -> dict[str, Any]:
+        """Read the current issue fields from Jira without persisting the response."""
+        data = await self.request(
+            "GET",
+            f"/rest/api/3/issue/{issue_id_or_key}",
+            params={"fields": "*all", "expand": "names,schema"},
+        )
+        return cast(dict[str, Any], data)
+
     async def field_contexts(self, field_id: str) -> list[dict[str, Any]]:
         return [item async for item in self.paged(f"/rest/api/3/field/{field_id}/context", value_key="values")]
 

@@ -103,3 +103,15 @@ async def test_bulk_changelog_filters_due_date_and_paginates() -> None:
     assert [item["issueId"] for item in logs] == ["1", "2"]
     assert bodies[0]["fieldIds"] == ["duedate"]
     assert bodies[1]["nextPageToken"] == "next"
+@pytest.mark.asyncio
+async def test_issue_metadata_requests_all_current_fields() -> None:
+    async def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/rest/api/3/issue/SDHI-1"
+        assert request.url.params["fields"] == "*all"
+        assert request.url.params["expand"] == "names,schema"
+        return httpx.Response(200, json={"id": "1", "key": "SDHI-1", "fields": {"summary": "Live"}})
+
+    async with JiraClient("https://example.atlassian.net", "a", "b", transport=httpx.MockTransport(handler)) as client:
+        issue = await client.issue_metadata("SDHI-1")
+
+    assert issue["fields"]["summary"] == "Live"

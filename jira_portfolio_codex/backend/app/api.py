@@ -13,6 +13,7 @@ from .jira import JiraClient
 from .metadata import MetadataService
 from .models import (
     DashboardConfig,
+    GridConfig,
     HierarchyAnomaly,
     Issue,
     IssueFieldValue,
@@ -24,6 +25,7 @@ from .models import (
     JiraStatus,
     MetadataRefresh,
     MetricDefinition,
+    SprintViewConfig,
     SyncRun,
     TraceabilityConfig,
 )
@@ -31,12 +33,14 @@ from .schemas import (
     CardSummaryRequest,
     DashboardConfigIn,
     FieldOut,
+    GridConfigIn,
     GroupByRequest,
     IssueTypeOut,
     ListEnvelope,
     MetricConfigIn,
     ProjectOut,
     SelectionUpdate,
+    SprintViewConfigIn,
     StatusOut,
     SyncRequest,
     TraceabilityConfigIn,
@@ -92,6 +96,26 @@ async def test_connection(client: Annotated[JiraClient, Depends(jira_client)], d
     }
 
 
+@router.get("/jira/issues/{issue_id_or_key}/metadata")
+async def live_issue_metadata(
+    issue_id_or_key: str,
+    client: Annotated[JiraClient, Depends(jira_client)],
+) -> dict[str, Any]:
+    """Proxy current Jira issue metadata; the payload is intentionally not stored."""
+    issue = await client.issue_metadata(issue_id_or_key)
+    fields = issue.get("fields") if isinstance(issue.get("fields"), dict) else {}
+    names = issue.get("names") if isinstance(issue.get("names"), dict) else {}
+    schema = issue.get("schema") if isinstance(issue.get("schema"), dict) else {}
+    return {
+        "id": issue.get("id"),
+        "key": issue.get("key", issue_id_or_key),
+        "self": issue.get("self"),
+        "fields": fields,
+        "names": names,
+        "schema": schema,
+    }
+
+
 @router.post("/admin/metadata/refresh", dependencies=[Depends(require_admin)])
 async def refresh_metadata(client: Annotated[JiraClient, Depends(jira_client)], db: Db) -> dict[str, Any]:
     run = await MetadataService(db, client).refresh()
@@ -122,9 +146,134 @@ def traceability_config_dict(row: TraceabilityConfig | None, project_id: str) ->
     return {
         "project_id": project_id,
         "grouping_fields": row.grouping_fields_json if row else ["labels", "status_id", "issue_type_id"],
+        "level_captions": row.level_captions_json if row else [],
         "updated_at": row.updated_at if row else None,
         "persisted": row is not None,
     }
+
+
+MANDATORY_GRID_COLUMNS = ["key", "summary", "issue_type", "baseline_due", "revised_due", "status"]
+
+
+def applicable_grid_field_ids(project_id: str, db: Session) -> set[str]:
+    raw_fields: list[dict[str, Any]] = list(
+        db.scalars(
+            select(Issue.raw_fields_json).where(
+                Issue.project_jira_id == project_id, Issue.is_deleted_or_inaccessible.is_(False)
+            )
+        )
+    )
+    return {field_id for raw in raw_fields for field_id in (raw or {})}
+
+
+def grid_config_dict(row: GridConfig | None, project_id: str, db: Session) -> dict[str, Any]:
+    optional_fields = row.optional_fields_json if row else []
+    names = {field.jira_field_id: field.name for field in db.scalars(select(JiraField).where(JiraField.jira_field_id.in_(optional_fields)))}
+    return {
+        "project_id": project_id,
+        "mandatory_columns": MANDATORY_GRID_COLUMNS,
+        "optional_fields": [{"field_id": field_id, "name": names.get(field_id, field_id)} for field_id in optional_fields],
+        "updated_at": row.updated_at if row else None,
+        "persisted": row is not None,
+    }
+
+
+def default_sprint_fields(db: Session) -> list[str]:
+    sprint = db.scalar(select(JiraField).where(func.lower(JiraField.name) == "sprint"))
+    return [sprint.jira_field_id, "status_id", "issue_type_id"] if sprint else ["status_id", "issue_type_id"]
+
+
+def sprint_view_config_dict(row: SprintViewConfig | None, project_id: str, db: Session) -> dict[str, Any]:
+    grouping_fields = row.grouping_fields_json if row else default_sprint_fields(db)
+    captions = row.level_captions_json if row else []
+    return {
+        "project_id": project_id,
+        "grouping_fields": grouping_fields,
+        "level_captions": captions,
+        "updated_at": row.updated_at if row else None,
+        "persisted": row is not None,
+    }
+
+
+@router.get("/sprint-view-config/{project_id}")
+def get_sprint_view_config(project_id: str, db: Db) -> dict[str, Any]:
+    if db.scalar(select(JiraProject).where(JiraProject.jira_project_id == project_id)) is None:
+        raise HTTPException(404, "Project not found")
+    row = db.scalar(select(SprintViewConfig).where(SprintViewConfig.project_jira_id == project_id))
+    return sprint_view_config_dict(row, project_id, db)
+
+
+@router.put("/admin/sprint-view-config/{project_id}", dependencies=[Depends(require_admin)])
+def save_sprint_view_config(project_id: str, update: SprintViewConfigIn, db: Db) -> dict[str, Any]:
+    if db.scalar(select(JiraProject).where(JiraProject.jira_project_id == project_id)) is None:
+        raise HTTPException(404, "Project not found")
+    if len(update.grouping_fields) != len(set(update.grouping_fields)):
+        raise HTTPException(422, "Sprint grouping fields must be unique")
+    if update.level_captions and len(update.level_captions) != len(update.grouping_fields):
+        raise HTTPException(422, "Level captions must match the number of grouping fields")
+    raw_system_fields = {
+        "summary", "project", "issuetype", "status", "parent", "assignee", "reporter", "created", "updated", "duedate",
+        "resolutiondate",
+    }
+    allowed = (applicable_grid_field_ids(project_id, db) - raw_system_fields) | {"status_id", "issue_type_id", "assignee"}
+    invalid = [field_id for field_id in update.grouping_fields if field_id not in allowed]
+    if invalid:
+        raise HTTPException(422, f"Fields are not applicable to this project: {', '.join(invalid)}")
+    captions = [caption.strip() for caption in update.level_captions] if update.level_captions else [""] * len(update.grouping_fields)
+    if any(len(caption) > 100 for caption in captions):
+        raise HTTPException(422, "Level captions must be 100 characters or fewer")
+    row = db.scalar(select(SprintViewConfig).where(SprintViewConfig.project_jira_id == project_id))
+    if row is None:
+        row = SprintViewConfig(project_jira_id=project_id, grouping_fields_json=update.grouping_fields, level_captions_json=captions)
+        db.add(row)
+    else:
+        row.grouping_fields_json = update.grouping_fields
+        row.level_captions_json = captions
+    db.commit()
+    db.refresh(row)
+    return sprint_view_config_dict(row, project_id, db)
+
+
+@router.get("/grid-config/{project_id}")
+def get_grid_config(project_id: str, db: Db) -> dict[str, Any]:
+    if db.scalar(select(JiraProject).where(JiraProject.jira_project_id == project_id)) is None:
+        raise HTTPException(404, "Project not found")
+    row = db.scalar(select(GridConfig).where(GridConfig.project_jira_id == project_id))
+    return grid_config_dict(row, project_id, db)
+
+
+@router.get("/grid-config/{project_id}/fields", response_model=ListEnvelope[FieldOut])
+def grid_config_fields(project_id: str, db: Db) -> ListEnvelope[FieldOut]:
+    if db.scalar(select(JiraProject).where(JiraProject.jira_project_id == project_id)) is None:
+        raise HTTPException(404, "Project not found")
+    applicable = applicable_grid_field_ids(project_id, db)
+    rows = list(db.scalars(select(JiraField).where(JiraField.jira_field_id.in_(applicable)).order_by(JiraField.name)))
+    return ListEnvelope(items=[FieldOut.model_validate(row) for row in rows], total_count=len(rows), sync_version=version(db))
+
+
+@router.put("/admin/grid-config/{project_id}", dependencies=[Depends(require_admin)])
+def save_grid_config(project_id: str, update: GridConfigIn, db: Db) -> dict[str, Any]:
+    if db.scalar(select(JiraProject).where(JiraProject.jira_project_id == project_id)) is None:
+        raise HTTPException(404, "Project not found")
+    if len(update.optional_fields) != len(set(update.optional_fields)):
+        raise HTTPException(422, "Grid fields must be unique")
+    discovered = set(db.scalars(select(JiraField.jira_field_id)))
+    unknown = [field_id for field_id in update.optional_fields if field_id not in discovered]
+    if unknown:
+        raise HTTPException(422, f"Unknown grid fields: {', '.join(unknown)}")
+    applicable = applicable_grid_field_ids(project_id, db)
+    invalid = [field_id for field_id in update.optional_fields if field_id not in applicable]
+    if invalid:
+        raise HTTPException(422, f"Fields are not applicable to this project: {', '.join(invalid)}")
+    row = db.scalar(select(GridConfig).where(GridConfig.project_jira_id == project_id))
+    if row is None:
+        row = GridConfig(project_jira_id=project_id, optional_fields_json=update.optional_fields)
+        db.add(row)
+    else:
+        row.optional_fields_json = update.optional_fields
+    db.commit()
+    db.refresh(row)
+    return grid_config_dict(row, project_id, db)
 
 
 @router.get("/traceability-config/{project_id}")
@@ -133,6 +282,24 @@ def get_traceability_config(project_id: str, db: Db) -> dict[str, Any]:
         raise HTTPException(404, "Project not found")
     row = db.scalar(select(TraceabilityConfig).where(TraceabilityConfig.project_jira_id == project_id))
     return traceability_config_dict(row, project_id)
+
+
+@router.get("/portfolio/wbs-flow/{project_id}")
+def portfolio_wbs_flow(project_id: str, db: Db) -> dict[str, Any]:
+    if db.scalar(select(JiraProject).where(JiraProject.jira_project_id == project_id)) is None:
+        raise HTTPException(404, "Project not found")
+    row = db.scalar(select(TraceabilityConfig).where(TraceabilityConfig.project_jira_id == project_id))
+    fields = row.grouping_fields_json if row else ["labels", "status_id", "issue_type_id"]
+    saved_captions = row.level_captions_json if row else []
+    discovered_names = {field.jira_field_id: field.name for field in db.scalars(select(JiraField))}
+    core_names = {"status_id": "Status", "issue_type_id": "Issue type", "assignee": "Assignee"}
+    captions = [
+        saved_captions[index].strip()
+        if index < len(saved_captions) and saved_captions[index].strip()
+        else core_names.get(field_id, discovered_names.get(field_id, field_id))
+        for index, field_id in enumerate(fields)
+    ]
+    return AnalyticsService(db).wbs_flow(project_id, fields, captions)
 
 
 @router.put("/admin/traceability-config/{project_id}", dependencies=[Depends(require_admin)])
@@ -144,12 +311,18 @@ def save_traceability_config(project_id: str, update: TraceabilityConfigIn, db: 
     unknown = [field_id for field_id in update.grouping_fields if field_id not in core_fields | discovered]
     if unknown:
         raise HTTPException(422, f"Unknown grouping fields: {', '.join(unknown)}")
+    if update.level_captions and len(update.level_captions) != len(update.grouping_fields):
+        raise HTTPException(422, "Level captions must match the number of grouping fields")
+    captions = [caption.strip() for caption in update.level_captions] if update.level_captions else [""] * len(update.grouping_fields)
+    if any(len(caption) > 100 for caption in captions):
+        raise HTTPException(422, "Level captions must be 100 characters or fewer")
     row = db.scalar(select(TraceabilityConfig).where(TraceabilityConfig.project_jira_id == project_id))
     if row is None:
-        row = TraceabilityConfig(project_jira_id=project_id, grouping_fields_json=update.grouping_fields)
+        row = TraceabilityConfig(project_jira_id=project_id, grouping_fields_json=update.grouping_fields, level_captions_json=captions)
         db.add(row)
     else:
         row.grouping_fields_json = update.grouping_fields
+        row.level_captions_json = captions
     db.commit()
     db.refresh(row)
     return traceability_config_dict(row, project_id)
@@ -310,6 +483,9 @@ def issue_dict(issue: Issue, db: Session, include_fields: bool = False) -> dict[
         "due_at": issue.due_at,
         "is_deleted_or_inaccessible": issue.is_deleted_or_inaccessible,
     }
+    grid_config = db.scalar(select(GridConfig).where(GridConfig.project_jira_id == issue.project_jira_id))
+    configured_fields = grid_config.optional_fields_json if grid_config else []
+    result["configured_fields"] = {field_id: issue.raw_fields_json.get(field_id) for field_id in configured_fields}
     if include_fields:
         values = list(
             db.scalars(

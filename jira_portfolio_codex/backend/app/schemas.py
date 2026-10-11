@@ -93,3 +93,13 @@ class DashboardConfigIn(BaseModel):
 
 class TraceabilityConfigIn(BaseModel):
     grouping_fields: list[str] = Field(min_length=1)
+    level_captions: list[str] = Field(default_factory=list)
+
+
+class GridConfigIn(BaseModel):
+    optional_fields: list[str] = Field(default_factory=list)
+
+
+class SprintViewConfigIn(BaseModel):
+    grouping_fields: list[str] = Field(min_length=1)
+    level_captions: list[str] = Field(default_factory=list)

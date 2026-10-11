@@ -147,7 +147,17 @@ def test_card_summary_counts_leaf_tasks_in_progress_and_delayed() -> None:
     assert result["on_track_count"] == 0
     assert result["delayed_count"] == 1
     assert result["no_due_date_count"] == 0
+    assert result["baseline_due_date"].startswith("2026-09-01")
+    assert result["latest_due_date"].startswith("2026-10-01")
     assert result["next_group_count"] == 3
+
+
+def test_wbs_flow_uses_configured_fields_and_distinct_issue_links() -> None:
+    result = AnalyticsService(analytics_db()).wbs_flow("10732", ["tags", "status_id"], ["Work group", "Workflow"])
+    assert [level["caption"] for level in result["levels"]] == ["Work group", "Workflow"]
+    assert result["issue_count"] == 3
+    assert any(node["label"] == "Alpha" for node in result["nodes"])
+    assert sum(link["value"] for link in result["links"]) == 4
 
 
 def test_unknown_fields_and_unsafe_shapes_are_rejected() -> None:
