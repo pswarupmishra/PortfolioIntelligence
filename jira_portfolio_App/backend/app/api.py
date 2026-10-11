@@ -1,4 +1,6 @@
+import asyncio
 import json
+from datetime import datetime, timezone
 from collections.abc import AsyncIterator
 from typing import Annotated, Any
 
@@ -30,6 +32,8 @@ from .models import (
     JiraStatus,
     MetadataRefresh,
     MetricDefinition,
+    ProjectPlan,
+    ProjectPlanBaseline,
     SprintGridConfig,
     SprintViewConfig,
     SyncRun,
@@ -47,6 +51,7 @@ from .schemas import (
     LoginIn,
     MetricConfigIn,
     ProjectOut,
+    ProjectPlanIn,
     SelectionUpdate,
     SprintViewConfigIn,
     StatusOut,
@@ -244,6 +249,59 @@ async def live_issue_metadata(
     }
 
 
+@router.get("/jira/portfolio-metrics", dependencies=[Depends(current_user)])
+async def live_portfolio_metrics(
+    db: Db,
+    client: Annotated[JiraClient, Depends(jira_client)],
+) -> dict[str, Any]:
+    """Return Jira-evaluated JQL counts for every locally enabled project.
+
+    Only the active-project selection comes from SQLite. Counts are requested from
+    Jira on every call and are never persisted by this application.
+    """
+    projects = list(db.scalars(select(JiraProject).where(JiraProject.active.is_(True)).order_by(JiraProject.name)))
+    semaphore = asyncio.Semaphore(4)
+
+    async def metrics_for(project: JiraProject) -> dict[str, Any]:
+        project_clause = f"project = {int(project.jira_project_id)}"
+        queries = {
+            "total": project_clause,
+            "open": f'{project_clause} AND resolution is EMPTY',
+            "to_do": f'{project_clause} AND statusCategory = "To Do"',
+            "in_progress": f'{project_clause} AND statusCategory = "In Progress"',
+            "done": f'{project_clause} AND statusCategory = Done',
+            "overdue": f'{project_clause} AND due < startOfDay() AND statusCategory != Done',
+            "due_today": f'{project_clause} AND due >= startOfDay() AND due <= endOfDay() AND statusCategory != Done',
+            "due_next_7_days": f'{project_clause} AND due > endOfDay() AND due <= endOfDay("+7d") AND statusCategory != Done',
+            "due_next_30_days": f'{project_clause} AND due > endOfDay() AND due <= endOfDay("+30d") AND statusCategory != Done',
+            "open_with_due_date": f'{project_clause} AND due is not EMPTY AND statusCategory != Done',
+            "no_due_date": f'{project_clause} AND due is EMPTY AND statusCategory != Done',
+            "unassigned": f'{project_clause} AND assignee is EMPTY AND statusCategory != Done',
+            "created_last_7_days": f'{project_clause} AND created >= -7d',
+            "created_last_30_days": f'{project_clause} AND created >= -30d',
+            "updated_last_7_days": f'{project_clause} AND updated >= -7d',
+            "stale_open_30_days": f'{project_clause} AND updated < -30d AND statusCategory != Done',
+            "resolved_last_7_days": f'{project_clause} AND resolved >= -7d',
+            "resolved_last_30_days": f'{project_clause} AND resolved >= -30d',
+        }
+        async with semaphore:
+            counts = {name: await client.approximate_issue_count(jql) for name, jql in queries.items()}
+        return {
+            "project_id": project.jira_project_id,
+            "key": project.key,
+            "name": project.name,
+            "metrics": counts,
+        }
+
+    items = await asyncio.gather(*(metrics_for(project) for project in projects))
+    return {
+        "source": "jira_live",
+        "count_method": "jira_jql_approximate_count",
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "items": items,
+    }
+
+
 @router.post("/admin/metadata/refresh", dependencies=[Depends(require_admin)])
 async def refresh_metadata(client: Annotated[JiraClient, Depends(jira_client)], db: Db) -> dict[str, Any]:
     run = await MetadataService(db, client).refresh()
@@ -258,6 +316,62 @@ def version(db: Session) -> int:
 def projects(db: Db) -> ListEnvelope[ProjectOut]:
     items = list(db.scalars(select(JiraProject).order_by(JiraProject.name)))
     return ListEnvelope(items=[ProjectOut.model_validate(x) for x in items], total_count=len(items), sync_version=version(db))
+
+
+def project_plan_payload(project: JiraProject, plan: ProjectPlan | None, db: Session) -> dict[str, Any]:
+    baselines = [] if plan is None else list(
+        db.scalars(select(ProjectPlanBaseline).where(ProjectPlanBaseline.project_plan_id == plan.id).order_by(ProjectPlanBaseline.version))
+    )
+    return {
+        "project_id": project.jira_project_id,
+        "key": project.key,
+        "name": project.name,
+        "start_date": plan.start_date.isoformat() if plan else None,
+        "baseline_date": baselines[0].end_date.isoformat() if baselines else None,
+        "latest_baseline_date": baselines[-1].end_date.isoformat() if baselines else None,
+        "latest_baseline_version": baselines[-1].version if baselines else 0,
+        "baselines": [
+            {"version": item.version, "end_date": item.end_date.isoformat(), "created_at": item.created_at.isoformat()}
+            for item in baselines
+        ],
+    }
+
+
+@router.get("/project-plans", dependencies=[Depends(current_user)])
+def list_project_plans(db: Db) -> dict[str, Any]:
+    active_projects = list(db.scalars(select(JiraProject).where(JiraProject.active.is_(True)).order_by(JiraProject.name)))
+    plans = {
+        item.project_jira_id: item
+        for item in db.scalars(select(ProjectPlan).where(ProjectPlan.project_jira_id.in_([project.jira_project_id for project in active_projects])))
+    } if active_projects else {}
+    return {"items": [project_plan_payload(project, plans.get(project.jira_project_id), db) for project in active_projects]}
+
+
+@router.put("/admin/project-plans/{jira_project_id}", dependencies=[Depends(require_admin)])
+def save_project_plan(jira_project_id: str, payload: ProjectPlanIn, db: Db) -> dict[str, Any]:
+    project = db.scalar(select(JiraProject).where(JiraProject.jira_project_id == jira_project_id, JiraProject.active.is_(True)))
+    if project is None:
+        raise HTTPException(404, "Active project not found")
+    if payload.end_date < payload.start_date:
+        raise HTTPException(422, "Baseline end date cannot be before the project start date")
+    plan = db.scalar(select(ProjectPlan).where(ProjectPlan.project_jira_id == jira_project_id))
+    if plan is None:
+        plan = ProjectPlan(project_jira_id=jira_project_id, start_date=payload.start_date)
+        db.add(plan)
+        db.flush()
+    else:
+        earliest_end = db.scalar(select(func.min(ProjectPlanBaseline.end_date)).where(ProjectPlanBaseline.project_plan_id == plan.id))
+        if earliest_end is not None and payload.start_date > earliest_end:
+            raise HTTPException(422, "Project start date cannot be after an existing baseline end date")
+        plan.start_date = payload.start_date
+    latest = db.scalar(
+        select(ProjectPlanBaseline).where(ProjectPlanBaseline.project_plan_id == plan.id).order_by(ProjectPlanBaseline.version.desc())
+    )
+    if latest is None or latest.end_date != payload.end_date:
+        db.add(ProjectPlanBaseline(project_plan_id=plan.id, version=(latest.version + 1 if latest else 1), end_date=payload.end_date))
+    db.commit()
+    db.refresh(plan)
+    return project_plan_payload(project, plan, db)
 
 
 @router.put("/admin/projects/{jira_project_id}", dependencies=[Depends(require_admin)])

@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from typing import Any
 
 from sqlalchemy import JSON, Boolean, DateTime, Float, ForeignKey, Index, Integer, String, Text, UniqueConstraint
@@ -30,6 +30,25 @@ class JiraProject(Base):
     metadata_json: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
     active: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+
+class ProjectPlan(Base):
+    __tablename__ = "project_plans"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    project_jira_id: Mapped[str] = mapped_column(ForeignKey("jira_projects.jira_project_id", ondelete="CASCADE"), unique=True, index=True)
+    start_date: Mapped[date] = mapped_column()
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+
+class ProjectPlanBaseline(Base):
+    __tablename__ = "project_plan_baselines"
+    __table_args__ = (UniqueConstraint("project_plan_id", "version", name="uq_project_plan_baseline_version"),)
+    id: Mapped[int] = mapped_column(primary_key=True)
+    project_plan_id: Mapped[int] = mapped_column(ForeignKey("project_plans.id", ondelete="CASCADE"), index=True)
+    version: Mapped[int] = mapped_column(Integer)
+    end_date: Mapped[date] = mapped_column()
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
 class JiraField(Base):

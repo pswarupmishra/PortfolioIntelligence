@@ -25,6 +25,8 @@ Phase 0 through Phase 3 provide a runnable React/FastAPI application for securel
 - Project and field filters with filtered Include-all/Exclude-all synchronization controls.
 - Persistent application-wide Default, Comfortable, and Large text modes.
 - Clickable Overview project snapshots that open WBS with the selected Jira project.
+- Administrator-managed Project Plan dates stored in SQLite, with an immutable Baseline 1 end date and automatically numbered revised end-date history. Overview project cards show the start, original baseline, and latest baseline.
+- Live Portfolio Metrics panels for every active project, using Jira's standard JQL count API rather than synchronized SQLite issue calculations. Panels cover 18 delivery-status, schedule-health, ownership, and recent-activity counts.
 - Mocked tests for paging, 401/403, 429 retry/exhaustion, metadata persistence, renamed custom fields, and basic API authorization/health.
 
 Historical trend snapshots and Phase 4's full interactive dashboard builder are intentionally not included yet.
@@ -66,6 +68,10 @@ Then open `http://localhost:5173`. Sign in initially as `admin` with password `P
 
 Administrators can remove a single project's local reporting data under **App Setting → Maintenance → Project data**. The screen requires the selected project key as confirmation and deletes only that project's SQLite issues, hierarchy facts, due-date history, view/grid configuration and project-scoped metadata. It does not modify Jira, and shared catalogs used by other projects are retained.
 
+Use **Project Plan** to enter each active project's start date and first approved end date. The first end date is stored as Baseline 1. Each different end date entered later is appended as Baseline 2, 3, and so on; earlier baselines are never overwritten. These governance dates are local application data and do not modify Jira.
+
+Use **Portfolio Metrics** for live Jira counts. Every refresh calls Jira for all active projects and does not read synchronized issue rows. Jira's approximate-count API supplies 18 metrics based only on standard Project, Status category, Resolution, Due date, Assignee, Created, Updated, and Resolved fields.
+
 Alternatively run `make backend` and `make frontend` in separate terminals. The development UI sends `X-App-Role: admin`; production deployment must replace this Phase 1 role boundary with trusted proxy/SSO authentication as described in `ARCHITECTURE.md`.
 
 ## Checks
@@ -83,6 +89,8 @@ Run only the backend tests with `cd backend && pytest`. Tests use mocked Jira re
 - `POST /api/v1/jira/test-connection`
 - `POST /api/v1/admin/metadata/refresh`
 - `GET /api/v1/jira/projects`
+- `GET /api/v1/jira/portfolio-metrics` for live standard Jira metrics across active projects
+- `GET /api/v1/project-plans` and `PUT /api/v1/admin/project-plans/{project_id}` for local project baseline governance
 - `GET /api/v1/metadata/fields?project_id=&issue_type_id=&search=`
 - `GET /api/v1/metadata/fields/{field_id}/options`
 - `GET /api/v1/metadata/issue-types`

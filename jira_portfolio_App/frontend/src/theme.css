@@ -62,10 +62,14 @@ aside nav { align-content: start; grid-auto-rows: max-content; flex: 1 1 auto; m
 .nav-parent { display: flex; align-items: center; justify-content: space-between; width: 100%; padding: 12px; background: rgba(255,255,255,.06); color: white; border-radius: 8px; font-size: 14px; text-align: left; }
 .nav-parent:hover { background: rgba(255,255,255,.11); }
 .nav-parent i { display: grid; place-items: center; width: 19px; height: 19px; border-radius: 5px; background: rgba(255,255,255,.12); font-style: normal; }
+.nav-parent>i:last-child{background:transparent;color:#aebfe8;font-size:14px}
+.nav-title{display:flex;align-items:center;gap:9px}.nav-title>i{flex:0 0 16px!important;width:16px!important;height:16px!important;background:transparent!important;color:#b8c8ee;font-size:13px;box-shadow:none}.nav-parent>span:not(.nav-title){display:flex;align-items:center;gap:9px}.nav-parent>span:not(.nav-title)::before{content:'⚙';display:grid;place-items:center;width:16px;height:16px;color:#b8c8ee;font-size:12px}
 .nav-subgroups { display: grid; gap: 5px; margin-left: 12px; padding-left: 9px; border-left: 1px solid rgba(255,255,255,.2); }
 .nav-subparent { display: flex; align-items: center; justify-content: space-between; width: 100%; padding: 9px 10px; border-radius: 7px; background: transparent; color: #d8dff3; font-size: 12px; text-align: left; }
 .nav-subparent:hover:not(:disabled) { background: rgba(255,255,255,.09); }
 .nav-subparent i { display: grid; place-items: center; width: 17px; height: 17px; border-radius: 4px; background: rgba(255,255,255,.1); font-style: normal; }
+.nav-subparent>i:last-child{background:transparent;color:#98acd9}
+.nav-subparent>span{display:flex;align-items:center;gap:7px}.nav-subparent>span::before{content:'·';display:grid;place-items:center;width:10px;color:#9fb2df;font-size:16px;font-weight:700}
 .nav-subgroups .nav-children { margin-left: 9px; }
 .nav-children { display: grid; gap: 3px; margin-left: 13px; padding-left: 10px; border-left: 1px solid rgba(255,255,255,.2); }
 .nav-children a { padding: 9px 10px; font-size: 12px; }
@@ -73,6 +77,8 @@ aside nav { align-content: start; grid-auto-rows: max-content; flex: 1 1 auto; m
 .nav-nested-parent { display: flex; align-items: center; justify-content: space-between; width: 100%; padding: 8px; border-radius: 6px; background: transparent; color: #d8dff3; font-size: 11px; text-align: left; }
 .nav-nested-parent:hover:not(:disabled) { background: rgba(255,255,255,.09); }
 .nav-nested-parent i { display: grid; place-items: center; width: 16px; height: 16px; border-radius: 4px; background: rgba(255,255,255,.1); font-style: normal; }
+.nav-nested-parent>i:last-child{background:transparent;color:#8fa4d4}
+.nav-nested-parent>span{display:flex;align-items:center;gap:6px}.nav-nested-parent>span::before{content:'—';color:#8298ca;font-size:9px}
 .nav-nested-children { display: grid; gap: 2px; margin-left: 8px; padding-left: 8px; border-left: 1px solid rgba(255,255,255,.16); }
 .nav-nested-children a { padding: 7px 8px; font-size: 11px; }
 .wbs-panel { position: relative; overflow: hidden; border: 1px solid #d8dfef; border-radius: 14px; background: radial-gradient(circle at 12% 10%, #f0f4ff 0, transparent 28%), radial-gradient(circle at 88% 88%, #fff0f0 0, transparent 30%), white; box-shadow: 0 14px 38px rgba(33,58,143,.08); }

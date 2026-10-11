@@ -146,6 +146,11 @@ class JiraClient:
             if data.get("isLast") is True or not next_page_token:
                 break
 
+    async def approximate_issue_count(self, jql: str) -> int:
+        """Ask Jira to evaluate a JQL count without downloading or storing issues."""
+        data = await self.request("POST", "/rest/api/3/search/approximate-count", json={"jql": jql})
+        return int(data.get("count", 0))
+
     async def bulk_changelogs(
         self, issue_ids_or_keys: list[str], field_ids: list[str], page_size: int = 1000
     ) -> AsyncIterator[dict[str, Any]]:

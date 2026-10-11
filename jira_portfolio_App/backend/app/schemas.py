@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any, Generic, TypeVar
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -122,3 +122,8 @@ class UserIn(BaseModel):
     role: str = "user"
     screen_permissions: list[str] = Field(default_factory=list)
     active: bool = True
+
+
+class ProjectPlanIn(BaseModel):
+    start_date: date
+    end_date: date

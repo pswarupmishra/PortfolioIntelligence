@@ -16,6 +16,7 @@ from app.api import (
     grafana_traceability,
     grafana_wbs,
     save_grid_config,
+    save_project_plan,
     save_sprint_grid_config,
     save_sprint_view_config,
     save_traceability_config,
@@ -23,14 +24,33 @@ from app.api import (
 )
 from app.db import Base
 from app.main import app
-from app.models import GridConfig, Issue, IssueDateChange, IssueFieldValue, JiraField, JiraFieldContext, JiraProject, SprintGridConfig, SprintViewConfig, TraceabilityConfig
-from app.schemas import FieldBulkSelection, GridConfigIn, SprintViewConfigIn, TraceabilityConfigIn
+from app.models import GridConfig, Issue, IssueDateChange, IssueFieldValue, JiraField, JiraFieldContext, JiraProject, ProjectPlanBaseline, SprintGridConfig, SprintViewConfig, TraceabilityConfig
+from app.schemas import FieldBulkSelection, GridConfigIn, ProjectPlanIn, SprintViewConfigIn, TraceabilityConfigIn
 
 
 def test_live_health() -> None:
     response = TestClient(app).get("/api/v1/health/live")
     assert response.status_code == 200
     assert response.json() == {"status": "ok"}
+
+
+def test_project_plan_preserves_numbered_baseline_history() -> None:
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+    db = Session(engine)
+    db.add(JiraProject(jira_project_id="10732", key="SDHI", name="Salem", active=True))
+    db.commit()
+
+    first = save_project_plan("10732", ProjectPlanIn(start_date="2026-01-01", end_date="2026-09-30"), db)
+    revised = save_project_plan("10732", ProjectPlanIn(start_date="2026-01-01", end_date="2026-11-30"), db)
+    unchanged = save_project_plan("10732", ProjectPlanIn(start_date="2026-01-01", end_date="2026-11-30"), db)
+
+    assert first["baseline_date"] == "2026-09-30"
+    assert revised["baseline_date"] == "2026-09-30"
+    assert revised["latest_baseline_date"] == "2026-11-30"
+    assert revised["latest_baseline_version"] == 2
+    assert unchanged["latest_baseline_version"] == 2
+    assert db.scalar(select(func.count(ProjectPlanBaseline.id))) == 2
 
 
 def test_admin_route_requires_role() -> None:

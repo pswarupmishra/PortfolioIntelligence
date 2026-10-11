@@ -115,3 +115,16 @@ async def test_issue_metadata_requests_all_current_fields() -> None:
         issue = await client.issue_metadata("SDHI-1")
 
     assert issue["fields"]["summary"] == "Live"
+
+
+@pytest.mark.asyncio
+async def test_approximate_issue_count_is_evaluated_by_jira() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/rest/api/3/search/approximate-count"
+        assert json.loads(request.content) == {"jql": 'project = 10732 AND statusCategory = "In Progress"'}
+        return httpx.Response(200, json={"count": 17})
+
+    async with JiraClient("https://example.atlassian.net", "a", "b", transport=httpx.MockTransport(handler)) as client:
+        count = await client.approximate_issue_count('project = 10732 AND statusCategory = "In Progress"')
+
+    assert count == 17
