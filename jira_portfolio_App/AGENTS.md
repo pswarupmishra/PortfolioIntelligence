@@ -1,4 +1,4 @@
-# Codex Instructions — Jira Executive Portfolio Intelligence
+# Instructions — Jira Executive Portfolio Intelligence
 
 Read `PRD.md`, `ARCHITECTURE.md`, `DATA_MODEL.md`, `API_CONTRACT.md`, and `IMPLEMENTATION_PLAN.md` before implementing. Build production-minded, testable software in small vertical slices. Do not fabricate Jira data or assume custom-field IDs, hierarchy levels, or status names.
 
