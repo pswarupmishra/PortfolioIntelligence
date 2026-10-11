@@ -57,7 +57,7 @@ aside { height: calc(100vh / var(--app-zoom)); overflow: hidden; }
 nav a { color: #c7d0ee; }
 nav a.active { background: var(--jsw-red); color: white !important; }
 nav a:hover { background: rgba(255,255,255,.09); color: white; }
-aside nav { flex: 1 1 auto; min-height: 0; margin-bottom: 14px; padding-right: 4px; overflow-y: auto; scrollbar-width: thin; scrollbar-color: rgba(255,255,255,.3) transparent; }
+aside nav { align-content: start; grid-auto-rows: max-content; flex: 1 1 auto; min-height: 0; margin-bottom: 14px; padding-right: 4px; overflow-y: auto; scrollbar-width: thin; scrollbar-color: rgba(255,255,255,.3) transparent; }
 .nav-group { display: grid; gap: 4px; }
 .nav-parent { display: flex; align-items: center; justify-content: space-between; width: 100%; padding: 12px; background: rgba(255,255,255,.06); color: white; border-radius: 8px; font-size: 14px; text-align: left; }
 .nav-parent:hover { background: rgba(255,255,255,.11); }
@@ -76,8 +76,8 @@ aside nav { flex: 1 1 auto; min-height: 0; margin-bottom: 14px; padding-right: 4
 .nav-nested-children { display: grid; gap: 2px; margin-left: 8px; padding-left: 8px; border-left: 1px solid rgba(255,255,255,.16); }
 .nav-nested-children a { padding: 7px 8px; font-size: 11px; }
 .wbs-panel { position: relative; overflow: hidden; border: 1px solid #d8dfef; border-radius: 14px; background: radial-gradient(circle at 12% 10%, #f0f4ff 0, transparent 28%), radial-gradient(circle at 88% 88%, #fff0f0 0, transparent 30%), white; box-shadow: 0 14px 38px rgba(33,58,143,.08); }
-.wbs-heading { display: flex; justify-content: space-between; align-items: center; gap: 18px; padding: 18px 22px; border-bottom: 1px solid #e2e7f2; }
-.wbs-heading h2 { margin-top: 6px; }
+.wbs-heading { display: flex; justify-content: space-between; align-items: center; gap: 18px; padding: 15px 20px; border-bottom: 1px solid #e2e7f2; background: linear-gradient(105deg,#f7f9ff 0%,#fff 55%,#fff7f7 100%); }
+.wbs-heading > div { display: grid; gap: 8px; min-width: 0; }
 .wbs-heading > span { color: var(--jsw-muted); font-size: 11px; }
 .sankey-wrap { width: 100%; overflow-x: auto; padding: 6px 12px 14px; }
 .sankey { display: block; min-width: 900px; width: 100%; height: auto; }
