@@ -3,7 +3,7 @@ from collections.abc import AsyncIterator
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Response
-from sqlalchemy import func, or_, select
+from sqlalchemy import delete, func, or_, select
 from sqlalchemy.orm import Session
 
 from .analytics import AnalyticsService, FilterValidationError
@@ -19,7 +19,9 @@ from .models import (
     GridConfig,
     HierarchyAnomaly,
     Issue,
+    IssueDateChange,
     IssueFieldValue,
+    IssueRelationship,
     JiraConnection,
     JiraField,
     JiraFieldContext,
@@ -266,6 +268,58 @@ def select_project(jira_project_id: str, update: SelectionUpdate, db: Db) -> Pro
     row.active = update.selected
     db.commit()
     return ProjectOut.model_validate(row)
+
+
+@router.delete("/admin/projects/{jira_project_id}/data", dependencies=[Depends(require_admin)])
+def delete_project_data(jira_project_id: str, db: Db, confirm: str = Query(...)) -> dict[str, Any]:
+    """Permanently remove one project's local SQLite data without writing to Jira."""
+    if confirm != jira_project_id:
+        raise HTTPException(400, "Confirmation must exactly match the Jira project ID")
+    project = db.scalar(select(JiraProject).where(JiraProject.jira_project_id == jira_project_id))
+    if project is None:
+        raise HTTPException(404, "Project not found")
+    project_key = project.key
+
+    issue_ids = list(db.scalars(select(Issue.id).where(Issue.project_jira_id == jira_project_id)))
+    counts = {
+        "issues": len(issue_ids),
+        "field_values": 0,
+        "date_changes": 0,
+        "relationships": 0,
+        "anomalies": 0,
+        "configurations": 0,
+        "field_contexts_removed": 0,
+        "field_contexts_updated": 0,
+    }
+    if issue_ids:
+        counts["field_values"] = db.execute(delete(IssueFieldValue).where(IssueFieldValue.issue_id.in_(issue_ids))).rowcount
+        counts["date_changes"] = db.execute(delete(IssueDateChange).where(IssueDateChange.issue_id.in_(issue_ids))).rowcount
+        counts["relationships"] = db.execute(
+            delete(IssueRelationship).where(
+                or_(IssueRelationship.child_issue_id.in_(issue_ids), IssueRelationship.parent_issue_id.in_(issue_ids))
+            )
+        ).rowcount
+        counts["anomalies"] = db.execute(delete(HierarchyAnomaly).where(HierarchyAnomaly.issue_id.in_(issue_ids))).rowcount
+        db.execute(delete(Issue).where(Issue.id.in_(issue_ids)))
+
+    for model in (TraceabilityConfig, GridConfig, SprintGridConfig, SprintViewConfig):
+        counts["configurations"] += db.execute(delete(model).where(model.project_jira_id == jira_project_id)).rowcount
+
+    for context in list(db.scalars(select(JiraFieldContext))):
+        project_ids = list(context.project_ids_json or [])
+        if jira_project_id not in project_ids:
+            continue
+        remaining = [project_id for project_id in project_ids if project_id != jira_project_id]
+        if remaining:
+            context.project_ids_json = remaining
+            counts["field_contexts_updated"] += 1
+        else:
+            db.delete(context)
+            counts["field_contexts_removed"] += 1
+
+    db.delete(project)
+    db.commit()
+    return {"status": "deleted", "project_id": jira_project_id, "project_key": project_key, "deleted": counts}
 
 
 def traceability_config_dict(row: TraceabilityConfig | None, project_id: str) -> dict[str, Any]:

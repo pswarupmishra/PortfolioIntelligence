@@ -8,6 +8,7 @@ Return consistent envelopes for paginated lists: `{items, next_cursor, total_cou
 - `POST /api/v1/admin/metadata/refresh` (admin).
 - `GET /api/v1/metadata/fields?project_id=&issue_type_id=&search=`.
 - `PUT /api/v1/admin/fields` (admin) body `{field_ids,selected}` for filtered bulk inclusion/exclusion.
+- `DELETE /api/v1/admin/projects/{jira_project_id}/data?confirm={jira_project_id}` (admin) — permanently removes only the selected project's synchronized SQLite data, project configurations and project-scoped metadata; it never writes to Jira.
 - `GET /api/v1/metadata/fields/{field_id}/options`.
 - `GET /api/v1/metadata/issue-types`, `GET /api/v1/metadata/statuses`.
 

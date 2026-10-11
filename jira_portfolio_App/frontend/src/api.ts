@@ -59,6 +59,7 @@ export const api = {
   sprintViewConfig: (projectId: string) => request<SprintViewConfig>(`/api/v1/sprint-view-config/${encodeURIComponent(projectId)}`),
   saveSprintViewConfig: (projectId: string, groupingFields: string[], levelCaptions: string[]) => request<SprintViewConfig>(`/api/v1/admin/sprint-view-config/${encodeURIComponent(projectId)}`, {method: 'PUT', body: JSON.stringify({grouping_fields: groupingFields, level_captions: levelCaptions})}),
   selectProject: (id: string, selected: boolean) => request<Project>(`/api/v1/admin/projects/${encodeURIComponent(id)}`, {method: 'PUT', body: JSON.stringify({selected})}),
+  deleteProjectData: (id: string) => request<{status: string; project_id: string; project_key: string; deleted: Record<string, number>}>(`/api/v1/admin/projects/${encodeURIComponent(id)}/data?confirm=${encodeURIComponent(id)}`, {method: 'DELETE'}),
   selectField: (id: string, selected: boolean) => request<Field>(`/api/v1/admin/fields/${encodeURIComponent(id)}`, {method: 'PUT', body: JSON.stringify({selected})}),
   selectFields: (fieldIds: string[], selected: boolean) => request<{updated_count: number; selected: boolean}>('/api/v1/admin/fields', {method: 'PUT', body: JSON.stringify({field_ids: fieldIds, selected})}),
   sync: ({mode, projectIds}: {mode: 'full' | 'incremental'; projectIds: string[]}) => request<SyncRun>('/api/v1/admin/sync', {method: 'POST', body: JSON.stringify({mode, project_ids: projectIds})}),

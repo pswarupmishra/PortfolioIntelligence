@@ -1,11 +1,14 @@
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine, select
+from datetime import datetime, timezone
+
+from sqlalchemy import create_engine, func, select
 from sqlalchemy.orm import Session
 
 from app.api import (
     fields as list_fields,
 )
 from app.api import (
+    delete_project_data,
     get_grid_config,
     get_sprint_grid_config,
     get_sprint_view_config,
@@ -20,7 +23,7 @@ from app.api import (
 )
 from app.db import Base
 from app.main import app
-from app.models import Issue, IssueFieldValue, JiraField, JiraFieldContext, JiraProject, TraceabilityConfig
+from app.models import GridConfig, Issue, IssueDateChange, IssueFieldValue, JiraField, JiraFieldContext, JiraProject, SprintGridConfig, SprintViewConfig, TraceabilityConfig
 from app.schemas import FieldBulkSelection, GridConfigIn, SprintViewConfigIn, TraceabilityConfigIn
 
 
@@ -82,6 +85,48 @@ def test_bulk_field_selection_updates_only_requested_catalog_fields() -> None:
     assert result == {"updated_count": 2, "selected": True}
     assert db.scalar(select(JiraField).where(JiraField.jira_field_id == "labels")).selected is True
     assert db.scalar(select(JiraField).where(JiraField.jira_field_id == "summary")).selected is False
+
+
+def test_project_data_deletion_is_scoped_and_removes_project_metadata() -> None:
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+    db = Session(engine)
+    db.add_all(
+        [
+            JiraProject(jira_project_id="10732", key="SDHI", name="Salem"),
+            JiraProject(jira_project_id="10467", key="QA", name="Quality"),
+            JiraField(jira_field_id="customfield_phase", name="Phase", schema_json={"type": "option"}, is_custom=True),
+        ]
+    )
+    db.flush()
+    removed_issue = Issue(jira_issue_id="1", issue_key="SDHI-1", project_jira_id="10732", summary="Remove")
+    retained_issue = Issue(jira_issue_id="2", issue_key="QA-1", project_jira_id="10467", summary="Keep")
+    db.add_all([removed_issue, retained_issue])
+    db.flush()
+    db.add(IssueFieldValue(issue_id=removed_issue.id, jira_field_id="customfield_phase", element_index=0, value_type="string", string_value="One", raw_value_json="One"))
+    db.add(IssueDateChange(issue_id=removed_issue.id, jira_field_id="duedate", changelog_id="1", changed_at=datetime.now(timezone.utc)))
+    db.add_all(
+        [
+            TraceabilityConfig(project_jira_id="10732", grouping_fields_json=["customfield_phase"]),
+            GridConfig(project_jira_id="10732", optional_fields_json=["customfield_phase"]),
+            SprintViewConfig(project_jira_id="10732", grouping_fields_json=["status_id"]),
+            SprintGridConfig(project_jira_id="10732", optional_fields_json=[]),
+            JiraFieldContext(jira_field_id="customfield_phase", context_id="sdhi", project_ids_json=["10732"], issue_type_ids_json=[], availability="available"),
+            JiraFieldContext(jira_field_id="customfield_phase", context_id="shared", project_ids_json=["10732", "10467"], issue_type_ids_json=[], availability="available"),
+        ]
+    )
+    db.commit()
+
+    result = delete_project_data("10732", db, confirm="10732")
+
+    assert result["deleted"]["issues"] == 1
+    assert db.scalar(select(JiraProject).where(JiraProject.jira_project_id == "10732")) is None
+    assert db.scalar(select(Issue).where(Issue.jira_issue_id == "1")) is None
+    assert db.scalar(select(Issue).where(Issue.jira_issue_id == "2")) is not None
+    assert db.scalar(select(func.count()).select_from(TraceabilityConfig)) == 0
+    assert db.scalar(select(JiraFieldContext).where(JiraFieldContext.context_id == "sdhi")) is None
+    shared = db.scalar(select(JiraFieldContext).where(JiraFieldContext.context_id == "shared"))
+    assert shared is not None and shared.project_ids_json == ["10467"]
 
 
 def test_project_field_catalog_excludes_permission_limited_custom_fields() -> None:

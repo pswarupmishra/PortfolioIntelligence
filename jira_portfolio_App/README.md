@@ -60,7 +60,9 @@ Start both services with:
 make dev
 ```
 
-Then open `http://localhost:5173`. Sign in initially as `admin` with password `Pass@1237`, then change that password in User management. The API is at `http://localhost:8000`, with Swagger UI at `http://localhost:8000/docs`.
+Then open `http://localhost:5173`. Sign in initially as `admin` with password `Pass@1237`, then change that password under **App Setting → Maintenance → User management**. Jira connectivity and metadata discovery are under **App Setting → Maintenance → Jira connection**. The API is at `http://localhost:8000`, with Swagger UI at `http://localhost:8000/docs`.
+
+Administrators can remove a single project's local reporting data under **App Setting → Maintenance → Project data**. The screen requires the selected project key as confirmation and deletes only that project's SQLite issues, hierarchy facts, due-date history, view/grid configuration and project-scoped metadata. It does not modify Jira, and shared catalogs used by other projects are retained.
 
 Alternatively run `make backend` and `make frontend` in separate terminals. The development UI sends `X-App-Role: admin`; production deployment must replace this Phase 1 role boundary with trusted proxy/SSO authentication as described in `ARCHITECTURE.md`.
 
