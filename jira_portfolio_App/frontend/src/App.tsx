@@ -406,19 +406,18 @@ function SankeyPlot({flow}: {flow: WbsFlow}) {
     window.addEventListener('keydown', close)
     return () => window.removeEventListener('keydown', close)
   }, [])
-  const width = 1200
+  // Layered network: each Jira grouping level is a column and each actual
+  // backend link is an edge. No edges are inferred from label similarity.
   const grouped = flow.levels.map((_, level) => flow.nodes.filter(node => node.level === level).sort((a, b) => b.value - a.value))
-  const maxNodes = Math.max(1, ...grouped.map(nodes => nodes.length))
-  const height = Math.max(520, maxNodes * 58 + 100)
-  const positions = new Map<string, {x: number; y: number; h: number}>()
+  const width = Math.max(1200, flow.levels.length * 300)
+  const height = Math.max(580, ...grouped.map(nodes => nodes.length * 74 + 100))
+  const columnGap = (width - 220) / Math.max(1, flow.levels.length - 1)
+  const positions = new Map<string, {x: number; y: number}>()
   grouped.forEach((nodes, level) => nodes.forEach((node, index) => {
-    const x = 90 + level * ((width - 180) / Math.max(1, flow.levels.length - 1))
-    const y = 75 + index * ((height - 120) / Math.max(1, nodes.length))
-    const h = Math.max(14, Math.min(38, 12 + (node.value / Math.max(1, flow.issue_count)) * 90))
-    positions.set(node.id, {x, y, h})
+    const x = 110 + level * columnGap
+    const y = 90 + index * ((height - 155) / Math.max(1, nodes.length))
+    positions.set(node.id, {x, y})
   }))
-  // Trace the complete selected route, not just immediate neighbours.
-  // Backward links lead to the selected node; forward links lead away from it.
   const upstream = new Set<string>(selected ? [selected] : [])
   const downstream = new Set<string>(selected ? [selected] : [])
   if (selected) {
@@ -431,10 +430,9 @@ function SankeyPlot({flow}: {flow: WbsFlow}) {
       }
     }
   }
-  const connected = new Set([...upstream, ...downstream])
-  const isSelectedPath = (source: string, target: string) =>
+  const highlighted = new Set([...upstream, ...downstream])
+  const highlightedEdge = (source: string, target: string) =>
     !selected || (upstream.has(source) && upstream.has(target)) || (downstream.has(source) && downstream.has(target))
-  const maxLink = Math.max(1, ...flow.links.map(link => link.value))
   const lastLevel = flow.levels.length - 1
   const leafField = flow.levels[lastLevel]?.field_id
   const nodeValue = (node: WbsFlow['nodes'][number]) => node.id.slice(node.id.indexOf(':') + 1)
@@ -451,7 +449,40 @@ function SankeyPlot({flow}: {flow: WbsFlow}) {
     setSelected(current => current === node.id ? null : node.id)
     if (node.level === lastLevel) setSelectedLeaf(node)
   }
-  return <section className="wbs-panel"><div className="wbs-heading path-cardhead"><div><span className="step">CONFIGURED TRACEABILITY FLOW</span><LevelPath captions={flow.levels.map(level => level.caption)}/></div><span>Click a terminal node to open its work-item grid</span></div><div className="sankey-wrap"><svg className="sankey" viewBox={`0 0 ${width} ${height}`} role="img" aria-label={`WBS Sankey flow for ${flow.issue_count} Jira work items`}><defs><linearGradient id="flow-gradient" x1="0" x2="1"><stop offset="0" stopColor="#29469a"/><stop offset=".55" stopColor="#7188ce"/><stop offset="1" stopColor="#d71920"/></linearGradient></defs>{flow.levels.map((level, index) => <text className="sankey-level" x={90 + index * ((width - 180) / Math.max(1, flow.levels.length - 1))} y="28" textAnchor="middle" key={level.field_id}>{level.caption}</text>)}<g className="sankey-links">{flow.links.map((link, index) => { const source = positions.get(link.source); const target = positions.get(link.target); if (!source || !target) return null; const active = isSelectedPath(link.source, link.target); const bend = (target.x - source.x) * .48; return <path className={active ? 'active' : 'dim'} d={`M ${source.x + 10} ${source.y + source.h / 2} C ${source.x + bend} ${source.y + source.h / 2}, ${target.x - bend} ${target.y + target.h / 2}, ${target.x - 10} ${target.y + target.h / 2}`} strokeWidth={active && selected ? Math.max(3.5, (link.value / maxLink) * 19) : Math.max(1.5, (link.value / maxLink) * 18)} key={`${link.source}-${link.target}-${index}`}><title>{link.value} work items</title></path>})}</g><g className="sankey-nodes">{flow.nodes.map(node => { const position = positions.get(node.id); if (!position) return null; const active = !selected || node.id === selected || connected.has(node.id); const last = node.level === lastLevel; return <g className={active ? 'active' : 'dim'} role="button" tabIndex={0} aria-label={`${node.label}, ${node.value} work items${last ? ', open grid' : ''}`} onClick={() => activateNode(node)} onKeyDown={event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); activateNode(node) } }} key={node.id}><rect x={position.x - 10} y={position.y} width="20" height={position.h} rx="7"/><circle cx={position.x} cy={position.y + position.h / 2} r="3"/><text x={last ? position.x - 18 : position.x + 18} y={position.y + position.h / 2 - 2} textAnchor={last ? 'end' : 'start'}>{node.label}</text><text className="sankey-value" x={last ? position.x - 18 : position.x + 18} y={position.y + position.h / 2 + 12} textAnchor={last ? 'end' : 'start'}>{node.value} work items</text></g>})}</g></svg></div>{selected && <button className="secondary wbs-reset" onClick={() => setSelected(null)}>Show all flows</button>}{selectedLeaf && leafFilter && <div className="wbs-modal-backdrop" onMouseDown={() => setSelectedLeaf(null)}><section className="wbs-modal" role="dialog" aria-modal="true" aria-labelledby="wbs-modal-title" onMouseDown={event => event.stopPropagation()}><div className="wbs-modal-head"><div><span className="step">{flow.levels[lastLevel].caption} · WORK ITEMS</span><h2 id="wbs-modal-title">{selectedLeaf.label}</h2></div><button className="wbs-modal-close" onClick={() => setSelectedLeaf(null)} aria-label="Close WBS work-item grid">×</button></div><CardResults projectId={flow.project_id} filter={leafFilter} direct={flow.levels.some(level => level.field_id === 'issue_type_id')} groupLabel={selectedLeaf.label}/></section></div>}</section>
+  const linkedCount = flow.links.filter(link => link.value > 0).length
+  return <section className="wbs-panel network-panel">
+    <div className="wbs-heading path-cardhead"><div><span className="step">CONFIGURED TRACEABILITY NETWORK</span><LevelPath captions={flow.levels.map(level => level.caption)}/></div><span>Select a node to trace its relationships · Open a terminal node for its work-item grid</span></div>
+    <div className="network-summary"><strong>{flow.nodes.length} groups</strong><span>{linkedCount} relationships</span><span>{flow.issue_count} Jira work items</span>{selected && <button type="button" className="secondary" onClick={() => setSelected(null)}>Show all relationships</button>}</div>
+    <div className="sankey-wrap network-wrap">
+      <svg className="network-svg" viewBox={`0 0 ${width} ${height}`} role="img" aria-label={`Traceability relationship network for ${flow.issue_count} Jira work items`}>
+        <defs><marker id="network-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 Z" fill="#7b91ba"/></marker></defs>
+        {flow.levels.map((level, index) => <text key={level.field_id + index} className="network-level" x={110 + index * columnGap} y="35" textAnchor="middle">{level.caption}</text>)}
+        <g className="network-edges">{flow.links.map((link, index) => {
+          const source = positions.get(link.source)
+          const target = positions.get(link.target)
+          if (!source || !target || link.value <= 0) return null
+          const active = highlightedEdge(link.source, link.target)
+          const startX = source.x + 86
+          const endX = target.x - 86
+          const midX = (startX + endX) / 2
+          return <path key={`${link.source}-${link.target}-${index}`} className={selected ? active ? 'selected' : 'muted' : 'normal'} d={`M ${startX} ${source.y} C ${midX} ${source.y}, ${midX} ${target.y}, ${endX} ${target.y}`} strokeWidth={selected && active ? 3.2 : 1.5}><title>{link.value} shared work items</title></path>
+        })}</g>
+        <g className="network-nodes">{flow.nodes.map(node => {
+          const pos = positions.get(node.id)
+          if (!pos) return null
+          const active = !selected || highlighted.has(node.id)
+          const picked = selected === node.id
+          return <g key={node.id} className={`${active ? 'active' : 'muted'} ${picked ? 'picked' : ''}`} transform={`translate(${pos.x - 86} ${pos.y - 24})`} role="button" tabIndex={0} aria-label={`${node.label}: ${node.value} work items`} onClick={() => activateNode(node)} onKeyDown={event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); activateNode(node) } }}>
+            <rect width="172" height="48" rx="10"/>
+            <rect className="network-accent" x="0" y="0" width="6" height="48" rx="3"/>
+            <text className="network-name" x="15" y="19">{node.label.length > 22 ? node.label.slice(0, 21) + '…' : node.label}<title>{node.label}</title></text>
+            <text className="network-count" x="15" y="36">{node.value} work items</text>
+          </g>
+        })}</g>
+      </svg>
+    </div>
+    {selectedLeaf && leafFilter && <div className="wbs-modal-backdrop" onMouseDown={() => setSelectedLeaf(null)}><section className="wbs-modal" role="dialog" aria-modal="true" aria-labelledby="wbs-modal-title" onMouseDown={event => event.stopPropagation()}><div className="wbs-modal-head"><div><span className="step">{flow.levels[lastLevel].caption} · WORK ITEMS</span><h2 id="wbs-modal-title">{selectedLeaf.label}</h2></div><button className="wbs-modal-close" onClick={() => setSelectedLeaf(null)} aria-label="Close WBS work-item grid">×</button></div><CardResults projectId={flow.project_id} filter={leafFilter} direct={flow.levels.some(level => level.field_id === 'issue_type_id')} groupLabel={selectedLeaf.label}/></section></div>}
+  </section>
 }
 
 type CardMetricsData = {task_count: number; in_progress_count: number; baseline_delayed_count: number; on_track_count: number; delayed_count: number; no_due_date_count: number; baseline_due_date: string | null; latest_due_date: string | null; next_group_count: number}
