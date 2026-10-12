@@ -50,6 +50,7 @@ export const api = {
   issueMetadata: (issueIdOrKey: string) => request<LiveIssueMetadata>(`/api/v1/jira/issues/${encodeURIComponent(issueIdOrKey)}/metadata`),
   portfolioMetrics: () => request<LivePortfolioMetrics>('/api/v1/jira/portfolio-metrics'),
   projectPlans: () => request<{items: ProjectPlan[]}>('/api/v1/project-plans'),
+  saveProjectGovernance: (projectId: string, projectStatus: string | null, managementSupport: string) => request<ProjectPlan>(`/api/v1/admin/project-governance/${encodeURIComponent(projectId)}`, {method: 'PUT', body: JSON.stringify({project_status: projectStatus, management_support: managementSupport})}),
   saveProjectPlan: (projectId: string, startDate: string, endDate: string, projectStatus: string | null, managementSupport: string) => request<ProjectPlan>(`/api/v1/admin/project-plans/${encodeURIComponent(projectId)}`, {method: 'PUT', body: JSON.stringify({start_date: startDate, end_date: endDate, project_status: projectStatus, management_support: managementSupport})}),
   dataModel: () => request<LiveDataModel>('/api/v1/documentation/data-model'),
   refresh: () => request<{status: string; counts: Record<string, number>; warnings: unknown[]}>('/api/v1/admin/metadata/refresh', {method: 'POST'}),
