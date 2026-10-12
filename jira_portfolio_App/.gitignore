@@ -14,3 +14,8 @@ frontend/dist/
 frontend/*.tsbuildinfo
 frontend/vite.config.js
 frontend/vite.config.d.ts
+
+# Separate historical intelligence SQLite store
+data/*.db
+data/*.db-wal
+data/*.db-shm
