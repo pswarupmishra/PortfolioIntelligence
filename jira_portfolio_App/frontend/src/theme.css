@@ -457,3 +457,10 @@ button.tree-row:focus-visible:not(:disabled) small { color: #5d687e; }
   .user-fields { grid-template-columns: 1fr; }
   .screen-options { grid-template-columns: 1fr; }
 }
+
+/* WBS selected route: make connected Sankey paths plainly visible. */
+.sankey-links path{stroke:url(#flow-gradient);opacity:.20;transition:opacity .2s ease,stroke-width .2s ease}
+.sankey-links path.active{opacity:.66}
+.sankey-links path.dim{opacity:.018}
+.sankey:has(.sankey-nodes g.dim) .sankey-links path.active{opacity:.93;filter:drop-shadow(0 1px 1px rgba(30,55,130,.25))}
+.sankey-nodes g.active{opacity:1}
