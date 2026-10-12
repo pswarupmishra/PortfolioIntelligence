@@ -18,3 +18,8 @@
 .project-plan-strip .rag-unset{color:#526174;background:#eef2f7}
 .project-plan-strip .governance-support strong{line-height:1.45;white-space:pre-wrap}
 @media(max-width:700px){.plan-governance-fields{grid-template-columns:1fr}.project-plan-strip{grid-template-columns:1fr}.project-plan-strip .governance-support{grid-column:auto}}
+
+.plan-governance-fields .governance-save{grid-column:1/-1;justify-self:start;border:0;border-radius:8px;padding:10px 16px;background:#1f397e;color:#fff;font:700 12px Manrope,Arial,sans-serif;cursor:pointer}
+.plan-governance-fields .governance-save:hover{background:#294b9f}
+.plan-governance-fields .governance-save:disabled{opacity:.6;cursor:wait}
+.plan-governance-fields .plan-error{grid-column:1/-1;margin:0}
