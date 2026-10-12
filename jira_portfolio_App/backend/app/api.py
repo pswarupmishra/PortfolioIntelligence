@@ -52,6 +52,7 @@ from .schemas import (
     MetricConfigIn,
     ProjectOut,
     ProjectPlanIn,
+    ProjectGovernanceIn,
     SelectionUpdate,
     SprintViewConfigIn,
     StatusOut,
@@ -326,7 +327,7 @@ def project_plan_payload(project: JiraProject, plan: ProjectPlan | None, db: Ses
         "project_id": project.jira_project_id,
         "key": project.key,
         "name": project.name,
-        "start_date": plan.start_date.isoformat() if plan else None,
+        "start_date": plan.start_date.isoformat() if plan and plan.start_date else None,
         "project_status": plan.project_status if plan else None,
         "management_support": plan.management_support if plan else "",
         "baseline_date": baselines[0].end_date.isoformat() if baselines else None,
@@ -386,6 +387,24 @@ def live_data_model(db: Db) -> dict[str, Any]:
         "nodes": nodes,
         "links": links,
     }
+
+
+@router.put("/admin/project-governance/{jira_project_id}", dependencies=[Depends(require_admin)])
+def save_project_governance(jira_project_id: str, payload: ProjectGovernanceIn, db: Db) -> dict[str, Any]:
+    project = db.scalar(select(JiraProject).where(JiraProject.jira_project_id == jira_project_id, JiraProject.active.is_(True)))
+    if project is None:
+        raise HTTPException(404, "Active project not found")
+    plan = db.scalar(select(ProjectPlan).where(ProjectPlan.project_jira_id == jira_project_id))
+    if plan is None:
+        # Governance can be maintained before baseline dates are entered.
+        # start_date remains nullable at the database level after migration 0013.
+        plan = ProjectPlan(project_jira_id=jira_project_id, start_date=None)
+        db.add(plan)
+    plan.project_status = payload.project_status
+    plan.management_support = payload.management_support.strip()
+    db.commit()
+    db.refresh(plan)
+    return project_plan_payload(project, plan, db)
 
 
 @router.put("/admin/project-plans/{jira_project_id}", dependencies=[Depends(require_admin)])
