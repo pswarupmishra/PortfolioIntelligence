@@ -1,6 +1,8 @@
 const baseUrl = import.meta.env.VITE_API_URL ?? 'http://localhost:8000'
 
 export type Envelope<T> = { items: T[]; next_cursor: string | null; total_count: number; sync_version: number }
+export type IntelligenceTrend = {source: string; project_id: string | null; days: number; first_snapshot: string | null; last_snapshot: string | null; message: string | null; caveat: string; latest: IntelligencePoint | null; points: IntelligencePoint[]}
+export type IntelligencePoint = {snapshot_date: string; total: number; done: number; in_progress: number; to_do: number; overdue: number; stale_30d: number; completion_pct: number}
 export type Project = { jira_project_id: string; key: string; name: string; active: boolean; updated_at: string }
 export type Field = { jira_field_id: string; name: string; schema_json: Record<string, unknown>; is_custom: boolean; searchable: boolean; selected: boolean; last_seen_at: string }
 export type Connection = { connected: boolean; base_url: string; account: { account_id?: string; display_name?: string } }
@@ -48,6 +50,7 @@ export const api = {
   health: () => request<{status: string; jira_configured: boolean}>('/api/v1/health/ready'),
   testConnection: () => request<Connection>('/api/v1/jira/test-connection', {method: 'POST'}),
   issueMetadata: (issueIdOrKey: string) => request<LiveIssueMetadata>(`/api/v1/jira/issues/${encodeURIComponent(issueIdOrKey)}/metadata`),
+  intelligenceTrends: (days: number, projectId = '') => request<IntelligenceTrend>(`/api/v1/intelligence/trends?days=${days}${projectId ? `&project_id=${encodeURIComponent(projectId)}` : ''}`),
   portfolioMetrics: () => request<LivePortfolioMetrics>('/api/v1/jira/portfolio-metrics'),
   projectPlans: () => request<{items: ProjectPlan[]}>('/api/v1/project-plans'),
   saveProjectGovernance: (projectId: string, projectStatus: string | null, managementSupport: string) => request<ProjectPlan>(`/api/v1/admin/project-governance/${encodeURIComponent(projectId)}`, {method: 'PUT', body: JSON.stringify({project_status: projectStatus, management_support: managementSupport})}),
