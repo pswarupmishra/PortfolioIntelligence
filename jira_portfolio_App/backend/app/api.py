@@ -327,6 +327,8 @@ def project_plan_payload(project: JiraProject, plan: ProjectPlan | None, db: Ses
         "key": project.key,
         "name": project.name,
         "start_date": plan.start_date.isoformat() if plan else None,
+        "project_status": plan.project_status if plan else None,
+        "management_support": plan.management_support if plan else "",
         "baseline_date": baselines[0].end_date.isoformat() if baselines else None,
         "latest_baseline_date": baselines[-1].end_date.isoformat() if baselines else None,
         "latest_baseline_version": baselines[-1].version if baselines else 0,
@@ -403,6 +405,8 @@ def save_project_plan(jira_project_id: str, payload: ProjectPlanIn, db: Db) -> d
         if earliest_end is not None and payload.start_date > earliest_end:
             raise HTTPException(422, "Project start date cannot be after an existing baseline end date")
         plan.start_date = payload.start_date
+    plan.project_status = payload.project_status
+    plan.management_support = payload.management_support.strip()
     latest = db.scalar(
         select(ProjectPlanBaseline).where(ProjectPlanBaseline.project_plan_id == plan.id).order_by(ProjectPlanBaseline.version.desc())
     )
