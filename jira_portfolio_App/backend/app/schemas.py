@@ -124,6 +124,13 @@ class UserIn(BaseModel):
     active: bool = True
 
 
+class ProjectGovernanceIn(BaseModel):
+    project_status: str | None = Field(default=None, pattern=r"^(Green|Amber|Red)$")
+    management_support: str = Field(default="", max_length=4000)
+
+
 class ProjectPlanIn(BaseModel):
     start_date: date
     end_date: date
+    project_status: str | None = Field(default=None, pattern=r"^(Green|Amber|Red)$")
+    management_support: str = Field(default="", max_length=4000)

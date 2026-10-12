@@ -125,17 +125,20 @@ function LiveMetric({icon, label, value, tone = ''}: {icon: string; label: strin
 function ProjectPlanPage({configured, onNotice}: {configured?: boolean; onNotice: (message: string) => void}) {
   const queryClient = useQueryClient()
   const plans = useQuery({queryKey: ['project-plans'], queryFn: api.projectPlans})
-  return <><PageHeader eyebrow="PORTFOLIO GOVERNANCE" title="Project Plan" subtitle="Maintain project start dates and an auditable sequence of end-date baselines." configured={configured}/><section className="plan-intro"><div><span aria-hidden="true">◆</span><div><strong>Baseline history is preserved</strong><p>The first end date becomes Baseline 1. Entering a different end date appends Baseline 2, 3 and onward without overwriting prior dates.</p></div></div><small>Stored locally in SQLite · Jira is not modified</small></section>{plans.isLoading ? <State text="Loading active project plans…"/> : plans.error ? <State text={plans.error.message}/> : <div className="plan-grid">{plans.data?.items.map(plan => <ProjectPlanPanel key={plan.project_id} plan={plan} onSaved={saved => { queryClient.setQueryData<{items: ProjectPlan[]}>(['project-plans'], current => ({items: (current?.items ?? []).map(item => item.project_id === saved.project_id ? saved : item)})); queryClient.invalidateQueries({queryKey: ['project-plans']}); onNotice(`${saved.key} project plan saved as Baseline ${saved.latest_baseline_version}.`) }}/>)}</div>}</>
+  return <><PageHeader eyebrow="PORTFOLIO GOVERNANCE" title="Project Plan" subtitle="Maintain project start dates and an auditable sequence of end-date baselines." configured={configured}/><section className="plan-intro"><div><span aria-hidden="true">◆</span><div><strong>Baseline history is preserved</strong><p>The first end date becomes Baseline 1. Entering a different end date appends Baseline 2, 3 and onward without overwriting prior dates.</p></div></div><small>Stored locally in SQLite · Jira is not modified</small></section>{plans.isLoading ? <State text="Loading active project plans…"/> : plans.error ? <State text={plans.error.message}/> : <div className="plan-grid">{plans.data?.items.map(plan => <ProjectPlanPanel key={plan.project_id} plan={plan} onSaved={saved => { queryClient.setQueryData<{items: ProjectPlan[]}>(['project-plans'], current => ({items: (current?.items ?? []).map(item => item.project_id === saved.project_id ? saved : item)})); queryClient.invalidateQueries({queryKey: ['project-plans']}); onNotice(`${saved.key} project plan and governance details saved.`) }}/>)}</div>}</>
 }
 
 function ProjectPlanPanel({plan, onSaved}: {plan: ProjectPlan; onSaved: (plan: ProjectPlan) => void}) {
   const [startDate, setStartDate] = useState(plan.start_date ?? '')
   const [endDate, setEndDate] = useState(plan.latest_baseline_date ?? '')
-  useEffect(() => { setStartDate(plan.start_date ?? ''); setEndDate(plan.latest_baseline_date ?? '') }, [plan.start_date, plan.latest_baseline_date])
-  const save = useMutation({mutationFn: () => api.saveProjectPlan(plan.project_id, startDate, endDate), onSuccess: onSaved})
+  const [projectStatus, setProjectStatus] = useState(plan.project_status ?? '')
+  const [managementSupport, setManagementSupport] = useState(plan.management_support ?? '')
+  useEffect(() => { setStartDate(plan.start_date ?? ''); setEndDate(plan.latest_baseline_date ?? ''); setProjectStatus(plan.project_status ?? ''); setManagementSupport(plan.management_support ?? '') }, [plan.start_date, plan.latest_baseline_date, plan.project_status, plan.management_support])
+  const save = useMutation({mutationFn: () => api.saveProjectPlan(plan.project_id, startDate, endDate, projectStatus || null, managementSupport), onSuccess: onSaved})
+  const governanceSave = useMutation({mutationFn: () => api.saveProjectGovernance(plan.project_id, projectStatus || null, managementSupport), onSuccess: onSaved})
   const dateLabel = (value: string) => new Intl.DateTimeFormat(undefined, {dateStyle: 'medium', timeZone: 'UTC'}).format(new Date(`${value}T00:00:00Z`))
   const newBaseline = Boolean(plan.latest_baseline_date && endDate && endDate !== plan.latest_baseline_date)
-  return <article className="plan-panel"><header><span>{plan.key}</span><div><h2>{plan.name}</h2><small>Jira project ID {plan.project_id}</small></div>{plan.latest_baseline_version > 0 && <b>{plan.latest_baseline_version} baseline{plan.latest_baseline_version === 1 ? '' : 's'}</b>}</header><div className="plan-fields"><label>Project start date<input type="date" value={startDate} onChange={event => setStartDate(event.target.value)}/></label><label>{plan.latest_baseline_version ? `New or current end date` : 'Baseline 1 end date'}<input type="date" min={startDate} value={endDate} onChange={event => setEndDate(event.target.value)}/></label></div>{plan.baselines.length > 0 && <div className="baseline-history"><strong>Baseline history</strong>{plan.baselines.map(item => <span className={item.version === plan.latest_baseline_version ? 'latest' : ''} key={item.version}><b>B{item.version}</b>{dateLabel(item.end_date)}{item.version === plan.latest_baseline_version && <i>Latest</i>}</span>)}</div>}{save.error && <p className="plan-error">{save.error.message}</p>}<button disabled={!startDate || !endDate || save.isPending} onClick={() => save.mutate()}>{save.isPending ? 'Saving…' : newBaseline ? `Add Baseline ${plan.latest_baseline_version + 1}` : plan.latest_baseline_version ? 'Save project dates' : 'Create Baseline 1'}</button></article>
+  return <article className="plan-panel"><header><span>{plan.key}</span><div><h2>{plan.name}</h2><small>Jira project ID {plan.project_id}</small></div>{plan.latest_baseline_version > 0 && <b>{plan.latest_baseline_version} baseline{plan.latest_baseline_version === 1 ? '' : 's'}</b>}</header><div className="plan-fields"><label>Project start date<input type="date" value={startDate} onChange={event => setStartDate(event.target.value)}/></label><label>{plan.latest_baseline_version ? `New or current end date` : 'Baseline 1 end date'}<input type="date" min={startDate} value={endDate} onChange={event => setEndDate(event.target.value)}/></label></div><div className="plan-governance-fields"><label>Project Status (RAG)<select value={projectStatus} onChange={event => setProjectStatus(event.target.value)}><option value="">Select status</option><option value="Green">Green — On Track</option><option value="Amber">Amber — At Risk</option><option value="Red">Red — Needs Attention</option></select></label><label>Support Required from Management<textarea rows={3} maxLength={4000} placeholder="Describe decisions, approvals, resources or escalations required…" value={managementSupport} onChange={event => setManagementSupport(event.target.value)}/></label><button className="governance-save" type="button" disabled={governanceSave.isPending} onClick={() => governanceSave.mutate()}>{governanceSave.isPending ? "Saving…" : "Save Governance"}</button>{governanceSave.error && <p className="plan-error">{governanceSave.error.message}</p>}</div>{plan.baselines.length > 0 && <div className="baseline-history"><strong>Baseline history</strong>{plan.baselines.map(item => <span className={item.version === plan.latest_baseline_version ? 'latest' : ''} key={item.version}><b>B{item.version}</b>{dateLabel(item.end_date)}{item.version === plan.latest_baseline_version && <i>Latest</i>}</span>)}</div>}{save.error && <p className="plan-error">{save.error.message}</p>}<button disabled={!startDate || !endDate || save.isPending} onClick={() => save.mutate()}>{save.isPending ? 'Saving…' : newBaseline ? `Add Baseline ${plan.latest_baseline_version + 1}` : plan.latest_baseline_version ? 'Save project dates' : 'Create Baseline 1'}</button></article>
 }
 
 function MaintenancePage({projects, configured, onNotice}: {projects: Project[]; configured?: boolean; onNotice: (message: string) => void}) {
@@ -301,7 +304,7 @@ function Overview({summary, groups, projects}: {summary?: Awaited<ReturnType<typ
 
 function PortfolioSnapshot({title, eyebrow, detail, summary, groups, loading, compact = false, plan}: {title: string; eyebrow: string; detail: string; summary?: Awaited<ReturnType<typeof api.summary>>; groups?: {value: unknown; label: string; issue_count: number}[]; loading?: boolean; compact?: boolean; plan?: ProjectPlan}) {
   const displayDate = (value: string | null | undefined) => value ? new Intl.DateTimeFormat(undefined, {dateStyle: 'medium', timeZone: 'UTC'}).format(new Date(`${value}T00:00:00Z`)) : 'Not defined'
-  return <section className={`analytics-panel ${compact ? 'project-analytics' : 'portfolio-total'}`}><div className="cardhead"><div><span className="step">{eyebrow}</span><h2>{title}</h2><small className="snapshot-detail">{detail}</small></div><span>Sync version {summary?.sync_version ?? '—'}</span></div>{compact && <div className="project-plan-strip"><span><small>Project start</small><strong>{displayDate(plan?.start_date)}</strong></span><span><small>Baseline 1 end</small><strong>{displayDate(plan?.baseline_date)}</strong></span><span><small>Latest baseline {plan?.latest_baseline_version ? `· B${plan.latest_baseline_version}` : ''}</small><strong>{displayDate(plan?.latest_baseline_date)}</strong></span></div>}{loading ? <State text="Calculating project metrics…"/> : <><div className="kpis">{summary?.metrics.map(metric => <div className="kpi" key={metric.metric_id}><small>{metric.metric_id.replaceAll('_', ' ')}</small><strong>{metric.unit === 'ratio' ? metric.value == null ? '—' : `${Math.round(metric.value * 100)}%` : metric.value ?? '—'}</strong><span>{metric.numerator} / {metric.denominator}</span></div>) ?? <State text="Run a sync to calculate portfolio metrics."/>}</div>{groups?.length ? <div className="distribution"><b>Status distribution</b><div>{groups.slice(0, compact ? 5 : 8).map(group => <span key={String(group.value)}>{group.label} <strong>{group.issue_count}</strong></span>)}</div></div> : null}</>}</section>
+  return <section className={`analytics-panel ${compact ? 'project-analytics' : 'portfolio-total'}`}><div className="cardhead"><div><span className="step">{eyebrow}</span><h2>{title}</h2><small className="snapshot-detail">{detail}</small></div><span>Sync version {summary?.sync_version ?? '—'}</span></div>{compact && <div className="project-plan-strip"><span><small>Project start</small><strong>{displayDate(plan?.start_date)}</strong></span><span><small>Baseline 1 end</small><strong>{displayDate(plan?.baseline_date)}</strong></span><span><small>Latest baseline {plan?.latest_baseline_version ? `· B${plan.latest_baseline_version}` : ''}</small><strong>{displayDate(plan?.latest_baseline_date)}</strong></span><span><small>Project Status (RAG)</small><strong className={`rag-status rag-${(plan?.project_status ?? "unset").toLowerCase()}`}>{plan?.project_status ?? "Not set"}</strong></span><span className="governance-support"><small>Support Required from Management</small><strong>{plan?.management_support?.trim() || "None specified"}</strong></span></div>}{loading ? <State text="Calculating project metrics…"/> : <><div className="kpis">{summary?.metrics.map(metric => <div className="kpi" key={metric.metric_id}><small>{metric.metric_id.replaceAll('_', ' ')}</small><strong>{metric.unit === 'ratio' ? metric.value == null ? '—' : `${Math.round(metric.value * 100)}%` : metric.value ?? '—'}</strong><span>{metric.numerator} / {metric.denominator}</span></div>) ?? <State text="Run a sync to calculate portfolio metrics."/>}</div>{groups?.length ? <div className="distribution"><b>Status distribution</b><div>{groups.slice(0, compact ? 5 : 8).map(group => <span key={String(group.value)}>{group.label} <strong>{group.issue_count}</strong></span>)}</div></div> : null}</>}</section>
 }
 
 function LevelPath({captions}: {captions: string[]}) {
@@ -403,20 +406,33 @@ function SankeyPlot({flow}: {flow: WbsFlow}) {
     window.addEventListener('keydown', close)
     return () => window.removeEventListener('keydown', close)
   }, [])
-  const width = 1200
+  // Layered network: each Jira grouping level is a column and each actual
+  // backend link is an edge. No edges are inferred from label similarity.
   const grouped = flow.levels.map((_, level) => flow.nodes.filter(node => node.level === level).sort((a, b) => b.value - a.value))
-  const maxNodes = Math.max(1, ...grouped.map(nodes => nodes.length))
-  const height = Math.max(520, maxNodes * 58 + 100)
-  const positions = new Map<string, {x: number; y: number; h: number}>()
+  const width = Math.max(1200, flow.levels.length * 300)
+  const height = Math.max(580, ...grouped.map(nodes => nodes.length * 74 + 100))
+  const columnGap = (width - 220) / Math.max(1, flow.levels.length - 1)
+  const positions = new Map<string, {x: number; y: number}>()
   grouped.forEach((nodes, level) => nodes.forEach((node, index) => {
-    const x = 90 + level * ((width - 180) / Math.max(1, flow.levels.length - 1))
-    const y = 75 + index * ((height - 120) / Math.max(1, nodes.length))
-    const h = Math.max(14, Math.min(38, 12 + (node.value / Math.max(1, flow.issue_count)) * 90))
-    positions.set(node.id, {x, y, h})
+    const x = 110 + level * columnGap
+    const y = 90 + index * ((height - 155) / Math.max(1, nodes.length))
+    positions.set(node.id, {x, y})
   }))
-  const connected = new Set<string>()
-  if (selected) flow.links.forEach(link => { if (link.source === selected) connected.add(link.target); if (link.target === selected) connected.add(link.source) })
-  const maxLink = Math.max(1, ...flow.links.map(link => link.value))
+  const upstream = new Set<string>(selected ? [selected] : [])
+  const downstream = new Set<string>(selected ? [selected] : [])
+  if (selected) {
+    let changed = true
+    while (changed) {
+      changed = false
+      for (const link of flow.links) {
+        if (upstream.has(link.target) && !upstream.has(link.source)) { upstream.add(link.source); changed = true }
+        if (downstream.has(link.source) && !downstream.has(link.target)) { downstream.add(link.target); changed = true }
+      }
+    }
+  }
+  const highlighted = new Set([...upstream, ...downstream])
+  const highlightedEdge = (source: string, target: string) =>
+    !selected || (upstream.has(source) && upstream.has(target)) || (downstream.has(source) && downstream.has(target))
   const lastLevel = flow.levels.length - 1
   const leafField = flow.levels[lastLevel]?.field_id
   const nodeValue = (node: WbsFlow['nodes'][number]) => node.id.slice(node.id.indexOf(':') + 1)
@@ -433,7 +449,40 @@ function SankeyPlot({flow}: {flow: WbsFlow}) {
     setSelected(current => current === node.id ? null : node.id)
     if (node.level === lastLevel) setSelectedLeaf(node)
   }
-  return <section className="wbs-panel"><div className="wbs-heading path-cardhead"><div><span className="step">CONFIGURED TRACEABILITY FLOW</span><LevelPath captions={flow.levels.map(level => level.caption)}/></div><span>Click a terminal node to open its work-item grid</span></div><div className="sankey-wrap"><svg className="sankey" viewBox={`0 0 ${width} ${height}`} role="img" aria-label={`WBS Sankey flow for ${flow.issue_count} Jira work items`}><defs><linearGradient id="flow-gradient" x1="0" x2="1"><stop offset="0" stopColor="#29469a"/><stop offset=".55" stopColor="#7188ce"/><stop offset="1" stopColor="#d71920"/></linearGradient></defs>{flow.levels.map((level, index) => <text className="sankey-level" x={90 + index * ((width - 180) / Math.max(1, flow.levels.length - 1))} y="28" textAnchor="middle" key={level.field_id}>{level.caption}</text>)}<g className="sankey-links">{flow.links.map((link, index) => { const source = positions.get(link.source); const target = positions.get(link.target); if (!source || !target) return null; const active = !selected || link.source === selected || link.target === selected || (connected.has(link.source) && connected.has(link.target)); const bend = (target.x - source.x) * .48; return <path className={active ? 'active' : 'dim'} d={`M ${source.x + 10} ${source.y + source.h / 2} C ${source.x + bend} ${source.y + source.h / 2}, ${target.x - bend} ${target.y + target.h / 2}, ${target.x - 10} ${target.y + target.h / 2}`} strokeWidth={Math.max(1.5, (link.value / maxLink) * 18)} key={`${link.source}-${link.target}-${index}`}><title>{link.value} work items</title></path>})}</g><g className="sankey-nodes">{flow.nodes.map(node => { const position = positions.get(node.id); if (!position) return null; const active = !selected || node.id === selected || connected.has(node.id); const last = node.level === lastLevel; return <g className={active ? 'active' : 'dim'} role="button" tabIndex={0} aria-label={`${node.label}, ${node.value} work items${last ? ', open grid' : ''}`} onClick={() => activateNode(node)} onKeyDown={event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); activateNode(node) } }} key={node.id}><rect x={position.x - 10} y={position.y} width="20" height={position.h} rx="7"/><circle cx={position.x} cy={position.y + position.h / 2} r="3"/><text x={last ? position.x - 18 : position.x + 18} y={position.y + position.h / 2 - 2} textAnchor={last ? 'end' : 'start'}>{node.label}</text><text className="sankey-value" x={last ? position.x - 18 : position.x + 18} y={position.y + position.h / 2 + 12} textAnchor={last ? 'end' : 'start'}>{node.value} work items</text></g>})}</g></svg></div>{selected && <button className="secondary wbs-reset" onClick={() => setSelected(null)}>Show all flows</button>}{selectedLeaf && leafFilter && <div className="wbs-modal-backdrop" onMouseDown={() => setSelectedLeaf(null)}><section className="wbs-modal" role="dialog" aria-modal="true" aria-labelledby="wbs-modal-title" onMouseDown={event => event.stopPropagation()}><div className="wbs-modal-head"><div><span className="step">{flow.levels[lastLevel].caption} · WORK ITEMS</span><h2 id="wbs-modal-title">{selectedLeaf.label}</h2></div><button className="wbs-modal-close" onClick={() => setSelectedLeaf(null)} aria-label="Close WBS work-item grid">×</button></div><CardResults projectId={flow.project_id} filter={leafFilter} direct={flow.levels.some(level => level.field_id === 'issue_type_id')} groupLabel={selectedLeaf.label}/></section></div>}</section>
+  const linkedCount = flow.links.filter(link => link.value > 0).length
+  return <section className="wbs-panel network-panel">
+    <div className="wbs-heading path-cardhead"><div><span className="step">CONFIGURED TRACEABILITY NETWORK</span><LevelPath captions={flow.levels.map(level => level.caption)}/></div><span>Select a node to trace its relationships · Open a terminal node for its work-item grid</span></div>
+    <div className="network-summary"><strong>{flow.nodes.length} groups</strong><span>{linkedCount} relationships</span><span>{flow.issue_count} Jira work items</span>{selected && <button type="button" className="secondary" onClick={() => setSelected(null)}>Show all relationships</button>}</div>
+    <div className="sankey-wrap network-wrap">
+      <svg className="network-svg" viewBox={`0 0 ${width} ${height}`} role="img" aria-label={`Traceability relationship network for ${flow.issue_count} Jira work items`}>
+        <defs><marker id="network-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 Z" fill="#7b91ba"/></marker></defs>
+        {flow.levels.map((level, index) => <text key={level.field_id + index} className="network-level" x={110 + index * columnGap} y="35" textAnchor="middle">{level.caption}</text>)}
+        <g className="network-edges">{flow.links.map((link, index) => {
+          const source = positions.get(link.source)
+          const target = positions.get(link.target)
+          if (!source || !target || link.value <= 0) return null
+          const active = highlightedEdge(link.source, link.target)
+          const startX = source.x + 86
+          const endX = target.x - 86
+          const midX = (startX + endX) / 2
+          return <path key={`${link.source}-${link.target}-${index}`} className={selected ? active ? 'selected' : 'muted' : 'normal'} d={`M ${startX} ${source.y} C ${midX} ${source.y}, ${midX} ${target.y}, ${endX} ${target.y}`} strokeWidth={selected && active ? 3.2 : 1.5}><title>{link.value} shared work items</title></path>
+        })}</g>
+        <g className="network-nodes">{flow.nodes.map(node => {
+          const pos = positions.get(node.id)
+          if (!pos) return null
+          const active = !selected || highlighted.has(node.id)
+          const picked = selected === node.id
+          return <g key={node.id} className={`${active ? 'active' : 'muted'} ${picked ? 'picked' : ''}`} transform={`translate(${pos.x - 86} ${pos.y - 24})`} role="button" tabIndex={0} aria-label={`${node.label}: ${node.value} work items`} onClick={() => activateNode(node)} onKeyDown={event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); activateNode(node) } }}>
+            <rect width="172" height="48" rx="10"/>
+            <rect className="network-accent" x="0" y="0" width="6" height="48" rx="3"/>
+            <text className="network-name" x="15" y="19">{node.label.length > 22 ? node.label.slice(0, 21) + '…' : node.label}<title>{node.label}</title></text>
+            <text className="network-count" x="15" y="36">{node.value} work items</text>
+          </g>
+        })}</g>
+      </svg>
+    </div>
+    {selectedLeaf && leafFilter && <div className="wbs-modal-backdrop" onMouseDown={() => setSelectedLeaf(null)}><section className="wbs-modal" role="dialog" aria-modal="true" aria-labelledby="wbs-modal-title" onMouseDown={event => event.stopPropagation()}><div className="wbs-modal-head"><div><span className="step">{flow.levels[lastLevel].caption} · WORK ITEMS</span><h2 id="wbs-modal-title">{selectedLeaf.label}</h2></div><button className="wbs-modal-close" onClick={() => setSelectedLeaf(null)} aria-label="Close WBS work-item grid">×</button></div><CardResults projectId={flow.project_id} filter={leafFilter} direct={flow.levels.some(level => level.field_id === 'issue_type_id')} groupLabel={selectedLeaf.label}/></section></div>}
+  </section>
 }
 
 type CardMetricsData = {task_count: number; in_progress_count: number; baseline_delayed_count: number; on_track_count: number; delayed_count: number; no_due_date_count: number; baseline_due_date: string | null; latest_due_date: string | null; next_group_count: number}

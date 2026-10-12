@@ -457,3 +457,31 @@ button.tree-row:focus-visible:not(:disabled) small { color: #5d687e; }
   .user-fields { grid-template-columns: 1fr; }
   .screen-options { grid-template-columns: 1fr; }
 }
+
+/* WBS selected route: make connected Sankey paths plainly visible. */
+.sankey-links path{stroke:url(#flow-gradient);opacity:.20;transition:opacity .2s ease,stroke-width .2s ease}
+.sankey-links path.active{opacity:.66}
+.sankey-links path.dim{opacity:.018}
+.sankey:has(.sankey-nodes g.dim) .sankey-links path.active{opacity:.93;filter:drop-shadow(0 1px 1px rgba(30,55,130,.25))}
+.sankey-nodes g.active{opacity:1}
+
+
+/* Layered WBS relationship network (replaces the old Sankey presentation). */
+.network-panel .network-summary{display:flex;flex-wrap:wrap;align-items:center;gap:10px;padding:12px 18px;border-bottom:1px solid #dfe7f3;background:#f8faff;color:#254477;font-size:12px}
+.network-summary strong,.network-summary span{border:1px solid #dfe7f3;background:#fff;border-radius:20px;padding:5px 11px}
+.network-summary button{margin-left:auto;padding:7px 12px;font-size:12px}
+.network-wrap{overflow:auto;padding:12px 16px 20px;background:linear-gradient(135deg,#f7f9ff,#fff 40%,#fff8f8);max-height:790px}
+.network-svg{display:block;width:100%;min-width:1050px;height:auto;overflow:visible}
+.network-level{font-size:15px;font-weight:800;fill:#203c86}
+.network-edges path{fill:none;stroke:#8095c2;opacity:.33;pointer-events:stroke;transition:opacity .2s,stroke-width .2s}
+.network-edges path.selected{stroke:#284eae;opacity:.95;filter:drop-shadow(0 1px 1px rgba(25,50,110,.15))}
+.network-edges path.muted{opacity:.04}
+.network-nodes g{cursor:pointer;outline:none;transition:opacity .2s}
+.network-nodes g.muted{opacity:.17}
+.network-nodes g rect:first-child{fill:#fff;stroke:#b8c8e7;stroke-width:1.4;filter:drop-shadow(0 3px 7px rgba(22,40,91,.10))}
+.network-nodes g .network-accent{fill:#294d9f;stroke:none}
+.network-nodes g:nth-child(even) .network-accent{fill:#c61725}
+.network-nodes g.picked rect:first-child{stroke:#284eae;stroke-width:3;fill:#eff4ff}
+.network-nodes g:focus-visible rect:first-child{stroke:#c61725;stroke-width:3}
+.network-nodes .network-name{font-size:12px;font-weight:800;fill:#152954}
+.network-nodes .network-count{font-size:10px;fill:#64748b;font-weight:600}

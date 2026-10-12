@@ -2,3 +2,24 @@
 .plan-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(390px,1fr));gap:18px}.plan-panel{background:#fff;border:1px solid #dfe5ee;border-radius:15px;overflow:hidden;box-shadow:0 10px 30px rgba(30,55,120,.06)}.plan-panel>header{display:grid;grid-template-columns:auto 1fr auto;align-items:center;gap:12px;margin:0;padding:18px 20px;border-bottom:1px solid #e7ebf2}.plan-panel>header>span{padding:8px;border-radius:8px;background:#1f397e;color:#fff;font:700 11px Manrope}.plan-panel>header h2{font-size:16px;margin:0}.plan-panel>header small{color:#71807a}.plan-panel>header>b{font-size:11px;color:#244799;background:#edf2ff;border-radius:20px;padding:6px 9px}.plan-fields{display:grid;grid-template-columns:1fr 1fr;gap:12px;padding:18px 20px}.plan-fields label{display:grid;gap:6px;color:#5d6b76;font-size:11px;font-weight:700}.plan-fields input{width:100%;border:1px solid #d8e0ec;border-radius:8px;padding:10px;font:inherit;color:#172a55}.baseline-history{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:0 20px 18px}.baseline-history>strong{width:100%;font-size:11px;color:#6b7773}.baseline-history>span{display:flex;gap:6px;align-items:center;padding:7px 9px;border:1px solid #dde4ef;border-radius:8px;color:#526174;font-size:11px}.baseline-history>span.latest{border-color:#9cb0e3;background:#f1f4ff;color:#1f3b82}.baseline-history b{color:#cf171f}.baseline-history i{font-style:normal;font-size:9px;text-transform:uppercase}.plan-panel>button{margin:0 20px 20px;background:#cf171f;color:#fff}.plan-error{margin:0 20px 12px;color:#b11820;font-size:12px}
 .project-plan-strip{display:grid;grid-template-columns:repeat(3,1fr);border-top:1px solid #e9edf5;border-bottom:1px solid #e9edf5;background:#f8faff}.project-plan-strip>span{padding:11px 14px;border-right:1px solid #e2e8f2}.project-plan-strip>span:last-child{border-right:0}.project-plan-strip small{display:block;color:#6c7890;font-size:9px;text-transform:uppercase;letter-spacing:.05em}.project-plan-strip strong{display:block;margin-top:4px;color:#19336f;font-size:12px}
 @media(max-width:700px){.plan-intro{align-items:flex-start;flex-direction:column}.plan-intro small{white-space:normal}.plan-grid{grid-template-columns:1fr}.plan-fields,.project-plan-strip{grid-template-columns:1fr}.project-plan-strip>span{border-right:0;border-bottom:1px solid #e2e8f2}}
+
+
+/* Project governance controls and compact overview display */
+.plan-governance-fields{display:grid;grid-template-columns:minmax(150px,1fr) minmax(0,2fr);gap:12px;padding:0 20px 18px}
+.plan-governance-fields label{display:grid;align-content:start;gap:7px;color:#53647a;font-size:11px;font-weight:700}
+.plan-governance-fields select,.plan-governance-fields textarea{width:100%;min-width:0;box-sizing:border-box;border:1px solid #d8e0ec;border-radius:8px;background:#fff;padding:10px 11px;color:#172a55;font:inherit}
+.plan-governance-fields textarea{resize:vertical;line-height:1.5}
+.project-plan-strip{grid-template-columns:repeat(3,minmax(0,1fr))}
+.project-plan-strip .governance-support{grid-column:span 2;overflow-wrap:anywhere}
+.project-plan-strip .rag-status{display:inline-block;padding:4px 9px;border-radius:16px;font-weight:800}
+.project-plan-strip .rag-green{color:#166534;background:#dcfce7}
+.project-plan-strip .rag-amber{color:#92400e;background:#fef3c7}
+.project-plan-strip .rag-red{color:#991b1b;background:#fee2e2}
+.project-plan-strip .rag-unset{color:#526174;background:#eef2f7}
+.project-plan-strip .governance-support strong{line-height:1.45;white-space:pre-wrap}
+@media(max-width:700px){.plan-governance-fields{grid-template-columns:1fr}.project-plan-strip{grid-template-columns:1fr}.project-plan-strip .governance-support{grid-column:auto}}
+
+.plan-governance-fields .governance-save{grid-column:1/-1;justify-self:start;border:0;border-radius:8px;padding:10px 16px;background:#1f397e;color:#fff;font:700 12px Manrope,Arial,sans-serif;cursor:pointer}
+.plan-governance-fields .governance-save:hover{background:#294b9f}
+.plan-governance-fields .governance-save:disabled{opacity:.6;cursor:wait}
+.plan-governance-fields .plan-error{grid-column:1/-1;margin:0}
