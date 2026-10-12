@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 
 from .models import AppSession, AppUser
 
-ALL_SCREENS = ["overview", "hierarchy", "traceability", "wbs", "sprints", "documentation"]
+ALL_SCREENS = ["overview", "hierarchy", "traceability", "wbs", "sprints", "intelligence", "documentation"]
 DEFAULT_ADMIN_USERNAME = "admin"
 DEFAULT_ADMIN_PASSWORD = "Pass@1237"
 
