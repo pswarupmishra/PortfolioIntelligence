@@ -229,15 +229,23 @@ class AnalyticsService:
             return value if value in keep_by_level[level] else ("__other__", "Other")
 
         node_members: dict[tuple[int, str, str], set[int]] = defaultdict(set)
-        link_members: dict[tuple[tuple[int, str, str], tuple[int, str, str]], set[int]] = defaultdict(set)
         for issue_id, levels in issue_paths:
             compacted = [[compact(index, value) for value in values] for index, values in enumerate(levels)]
             for level, values in enumerate(compacted):
                 for value, label in set(values):
                     node_members[(level, value, label)].add(issue_id)
-            for level in range(len(compacted) - 1):
-                for source, target in product(set(compacted[level]), set(compacted[level + 1])):
-                    link_members[((level, source[0], source[1]), (level + 1, target[0], target[1]))].add(issue_id)
+
+        # Calculate each link from actual issue membership in the adjacent nodes.
+        # It guarantees a link for any shared issues, including Phase I -> QA.
+        link_counts: dict[tuple[tuple[int, str, str], tuple[int, str, str]], int] = {}
+        for level in range(len(fields) - 1):
+            sources = [(key, members) for key, members in node_members.items() if key[0] == level]
+            targets = [(key, members) for key, members in node_members.items() if key[0] == level + 1]
+            for source, source_members in sources:
+                for target, target_members in targets:
+                    shared = len(source_members & target_members)
+                    if shared:
+                        link_counts[(source, target)] = shared
 
         def node_id(key: tuple[int, str, str]) -> str:
             return f"{key[0]}:{key[1]}"
@@ -252,8 +260,8 @@ class AnalyticsService:
                 for key, members in node_members.items()
             ],
             "links": [
-                {"source": node_id(source), "target": node_id(target), "value": len(members)}
-                for (source, target), members in link_members.items()
+                {"source": node_id(source), "target": node_id(target), "value": count}
+                for (source, target), count in link_counts.items()
             ],
             "issue_count": len(issues),
             "sync_version": sync_version(self.db),
