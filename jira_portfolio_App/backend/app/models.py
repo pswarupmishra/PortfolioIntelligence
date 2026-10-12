@@ -36,7 +36,7 @@ class ProjectPlan(Base):
     __tablename__ = "project_plans"
     id: Mapped[int] = mapped_column(primary_key=True)
     project_jira_id: Mapped[str] = mapped_column(ForeignKey("jira_projects.jira_project_id", ondelete="CASCADE"), unique=True, index=True)
-    start_date: Mapped[date] = mapped_column()
+    start_date: Mapped[date | None] = mapped_column(nullable=True)
     project_status: Mapped[str | None] = mapped_column(String(10), nullable=True)
     management_support: Mapped[str] = mapped_column(Text, default="", nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
