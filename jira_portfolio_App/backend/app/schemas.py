@@ -127,3 +127,5 @@ class UserIn(BaseModel):
 class ProjectPlanIn(BaseModel):
     start_date: date
     end_date: date
+    project_status: str | None = Field(default=None, pattern=r"^(Green|Amber|Red)$")
+    management_support: str = Field(default="", max_length=4000)
