@@ -62,6 +62,8 @@ from .schemas import (
 )
 from .sync import SyncBusyError, SyncService, sync_version
 
+from . import intelligence
+
 router = APIRouter(prefix="/api/v1")
 Db = Annotated[Session, Depends(get_db)]
 
@@ -1042,6 +1044,22 @@ def statuses(db: Db) -> ListEnvelope[StatusOut]:
     return ListEnvelope(items=[StatusOut.model_validate(x) for x in rows], total_count=len(rows), sync_version=version(db))
 
 
+@router.get("/intelligence/trends")
+def intelligence_trends(
+    db: Db,
+    user: Annotated[AppUser, Depends(current_user)],
+    days: int = Query(90, ge=7, le=365),
+    project_id: str | None = None,
+) -> dict[str, Any]:
+    if user.role != "admin" and "intelligence" not in (user.screen_permissions_json or []):
+        raise HTTPException(403, "Intelligence screen access required")
+    if project_id and not db.scalar(select(JiraProject).where(
+        JiraProject.jira_project_id == project_id, JiraProject.active.is_(True)
+    )):
+        raise HTTPException(404, "Active project not found")
+    return intelligence.report(project_id, days)
+
+
 @router.post("/admin/sync", dependencies=[Depends(require_admin)])
 async def start_sync(request: SyncRequest, client: Annotated[JiraClient, Depends(jira_client)], db: Db) -> dict[str, Any]:
     if request.mode not in {"full", "incremental"}:
@@ -1052,6 +1070,11 @@ async def start_sync(request: SyncRequest, client: Annotated[JiraClient, Depends
         raise HTTPException(409, str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
+    try:
+        intelligence.capture(db, run.id, run.projects_json)
+    except Exception:
+        import logging
+        logging.getLogger(__name__).exception("Historical snapshot capture failed")
     return sync_run_dict(run)
 
 
